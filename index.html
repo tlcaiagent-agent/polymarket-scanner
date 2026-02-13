@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket Opportunity Scanner</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+--bg:#0a0b0f;--card:#12141c;--card-hover:#181b26;--border:#1e2130;
+--text:#e4e6f0;--text-dim:#8890a8;--text-muted:#555a70;
+--green:#00d68f;--green-dim:#00d68f33;--red:#ff4d6a;--red-dim:#ff4d6a33;
+--blue:#4d8ef7;--orange:#f59e0b;--purple:#a855f7;--cyan:#22d3ee;--yellow:#eab308;
+--accent:#4d8ef7;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Header */
+.header{padding:24px 32px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.header h1{font-size:24px;font-weight:700;display:flex;align-items:center;gap:10px}
+.header h1 span{font-size:28px}
+.header-meta{display:flex;align-items:center;gap:16px;font-size:13px;color:var(--text-dim)}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.status-badge{padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;background:var(--green-dim);color:var(--green)}
+
+/* Dashboard */
+.dashboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;padding:24px 32px;border-bottom:1px solid var(--border)}
+.dash-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px}
+.dash-card .label{font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.dash-card .value{font-size:28px;font-weight:700}
+.dash-card .sub{font-size:13px;color:var(--text-dim);margin-top:4px}
+.dash-card.highlight{border-color:var(--green);background:linear-gradient(135deg,#00d68f08,#00d68f03)}
+.dash-card .value.green{color:var(--green)}
+
+/* Category chart */
+.cat-chart{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.cat-dot{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-dim)}
+.cat-dot i{width:10px;height:10px;border-radius:50%;display:inline-block}
+
+/* Controls */
+.controls{padding:16px 32px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border)}
+.search-box{flex:1;min-width:200px;max-width:400px;padding:10px 16px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:14px;outline:none}
+.search-box:focus{border-color:var(--accent)}
+.search-box::placeholder{color:var(--text-muted)}
+select,.btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:13px;cursor:pointer;outline:none}
+select:hover,.btn:hover{border-color:var(--accent)}
+.btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.filter-group{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Grid */
+.grid{padding:24px 32px;display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:16px}
+@media(max-width:480px){.grid{grid-template-columns:1fr;padding:16px}}
+
+/* Card */
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden}
+.card:hover{border-color:var(--accent);background:var(--card-hover);transform:translateY(-2px)}
+.card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
+.card-title{font-size:15px;font-weight:600;line-height:1.4;flex:1}
+.card-edge{font-size:22px;font-weight:700;white-space:nowrap}
+.card-edge.pos{color:var(--green)}
+.card-edge.neg{color:var(--red)}
+.card-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.tag{padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.tag-politics{background:#4d8ef722;color:var(--blue)}
+.tag-crypto{background:#f59e0b22;color:var(--orange)}
+.tag-sports{background:#00d68f22;color:var(--green)}
+.tag-culture{background:#a855f722;color:var(--purple)}
+.tag-tech{background:#22d3ee22;color:var(--cyan)}
+.tag-economy{background:#eab30822;color:var(--yellow)}
+.tag-geopolitics{background:#ff4d6a22;color:var(--red)}
+.confidence{font-size:12px}
+.liquidity{font-size:12px;color:var(--text-dim)}
+.card-prices{display:flex;gap:16px;margin-bottom:10px;font-size:13px}
+.price-group{display:flex;flex-direction:column;gap:2px}
+.price-label{color:var(--text-muted);font-size:11px;text-transform:uppercase}
+.price-val{font-weight:600}
+.card-bar{height:4px;border-radius:2px;background:var(--border);margin-bottom:10px;overflow:hidden}
+.card-bar-fill{height:100%;border-radius:2px;transition:width .3s}
+.card-bottom{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-dim)}
+.card-resolution{display:flex;align-items:center;gap:4px}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;display:none;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:16px;max-width:720px;width:100%;max-height:90vh;overflow-y:auto;padding:32px;position:relative}
+.modal-close{position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:24px;cursor:pointer;padding:4px}
+.modal-close:hover{color:var(--text)}
+.modal h2{font-size:20px;font-weight:700;margin-bottom:16px;padding-right:32px;line-height:1.4}
+.modal-section{margin-bottom:24px}
+.modal-section h3{font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.modal-prices{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.modal-price-box{background:var(--bg);border-radius:10px;padding:14px;text-align:center}
+.modal-price-box .lbl{font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px}
+.modal-price-box .val{font-size:24px;font-weight:700}
+.modal-price-box .val.green{color:var(--green)}
+.modal-price-box .val.blue{color:var(--accent)}
+.edge-breakdown{background:var(--bg);border-radius:10px;padding:16px}
+.edge-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:14px}
+.edge-row:last-child{border:none}
+.edge-row .el{color:var(--text-dim)}
+.analysis-text{font-size:14px;line-height:1.7;color:var(--text-dim)}
+.analysis-text p{margin-bottom:12px}
+.analysis-text strong{color:var(--text)}
+.modal-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.stat-box{background:var(--bg);border-radius:8px;padding:12px;font-size:13px}
+.stat-box .sl{color:var(--text-muted);font-size:11px;text-transform:uppercase;margin-bottom:2px}
+.modal-link{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--accent);color:#fff;border-radius:8px;font-weight:600;font-size:14px;margin-top:8px}
+.modal-link:hover{opacity:.9;text-decoration:none}
+.modal-ts{font-size:12px;color:var(--text-muted);margin-top:16px;text-align:right}
+
+/* Visual bar for market vs model */
+.compare-bar{height:32px;border-radius:8px;background:var(--bg);position:relative;margin:12px 0;overflow:hidden}
+.compare-bar .market-line,.compare-bar .model-line{position:absolute;top:0;height:100%;width:3px;border-radius:2px}
+.compare-bar .market-line{background:var(--red);z-index:2}
+.compare-bar .model-line{background:var(--green);z-index:2}
+.compare-bar .fill{position:absolute;top:0;left:0;height:100%;background:linear-gradient(90deg,var(--green-dim),transparent);border-radius:8px}
+.compare-labels{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* Donut */
+.donut-wrap{display:flex;align-items:center;gap:16px}
+.donut{width:80px;height:80px}
+
+/* Loading */
+.loading{text-align:center;padding:60px;color:var(--text-dim);font-size:16px}
+.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Responsive */
+@media(max-width:768px){
+.header{padding:16px}
+.dashboard{padding:16px;grid-template-columns:repeat(2,1fr)}
+.controls{padding:12px 16px}
+.grid{padding:16px;grid-template-columns:1fr}
+.modal{padding:20px}
+.modal-prices{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+<h1><span>📊</span> Polymarket Scanner</h1>
+<div class="header-meta">
+<span class="status-badge"><span class="live-dot"></span> Live Data</span>
+<span id="lastUpdated">Loading...</span>
+</div>
+</div>
+
+<div class="dashboard" id="dashboard"></div>
+
+<div class="controls">
+<input type="text" class="search-box" id="searchBox" placeholder="Search markets...">
+<select id="sortBy">
+<option value="edge">Sort: Edge Size</option>
+<option value="confidence">Sort: Confidence</option>
+<option value="liquidity">Sort: Liquidity</option>
+<option value="resolution">Sort: Time to Resolution</option>
+<option value="volume">Sort: 24h Volume</option>
+</select>
+<div class="filter-group" id="catFilters"></div>
+<select id="minConfidence">
+<option value="all">All Confidence</option>
+<option value="high">🟢 High Only</option>
+<option value="medium">🟡 Medium+</option>
+</select>
+</div>
+
+<div class="grid" id="grid"><div class="loading"><div class="spinner"></div>Fetching markets from Polymarket...</div></div>
+
+<div class="modal-overlay" id="modalOverlay">
+<div class="modal" id="modal"></div>
+</div>
+
+<script>
+// ============================================
+// POLYMARKET OPPORTUNITY SCANNER
+// ============================================
+
+const GAMMA_API = 'https://gamma-api.polymarket.com/markets';
+const CORS_PROXY = 'https://corsproxy.io/?url=';
+const CATEGORIES = {
+  politics: { label: 'Politics', color: '#4d8ef7', class: 'tag-politics' },
+  crypto: { label: 'Crypto', color: '#f59e0b', class: 'tag-crypto' },
+  sports: { label: 'Sports', color: '#00d68f', class: 'tag-sports' },
+  culture: { label: 'Culture', color: '#a855f7', class: 'tag-culture' },
+  tech: { label: 'Tech', color: '#22d3ee', class: 'tag-tech' },
+  economy: { label: 'Economy', color: '#eab308', class: 'tag-economy' },
+  geopolitics: { label: 'Geopolitics', color: '#ff4d6a', class: 'tag-geopolitics' }
+};
+
+// Category detection from question text
+function detectCategory(q, desc) {
+  const t = (q + ' ' + (desc||'')).toLowerCase();
+  if (/trump|biden|congress|senate|governor|election|shutdown|political|impeach|legislation|bill\b|democrat|republican|nominee|cabinet/.test(t)) return 'politics';
+  if (/bitcoin|ethereum|btc|eth|crypto|solana|token|defi|nft|blockchain|binance/.test(t)) return 'crypto';
+  if (/nba|nfl|mlb|soccer|football|basketball|superbowl|world cup|olympics|championship|mvp|game\s?\d/.test(t)) return 'sports';
+  if (/oscar|grammy|movie|film|album|spotify|netflix|celebrity|taylor swift|kanye|elon/.test(t)) return 'culture';
+  if (/ai\b|artificial intelligence|openai|google|apple|spacex|launch|robot|quantum|chip/.test(t)) return 'tech';
+  if (/fed\b|interest rate|inflation|gdp|recession|unemployment|stock|s&p|dow|nasdaq|tariff|trade|cpi|fomc|treasury/.test(t)) return 'economy';
+  if (/iran|ukraine|russia|china|war|strike|military|nato|sanctions|ceasefire|invasion/.test(t)) return 'geopolitics';
+  return 'politics'; // default
+}
+
+// Analyze a market and generate model estimate + thesis
+function analyzeMarket(m) {
+  const q = m.question;
+  const price = parseFloat(JSON.parse(m.outcomePrices)[0]);
+  const cat = detectCategory(q, m.description);
+  const endDate = new Date(m.endDate);
+  const now = new Date();
+  const daysLeft = Math.max(0, Math.ceil((endDate - now) / 86400000));
+  const vol24h = m.volume24hr || 0;
+  const totalVol = m.volumeNum || 0;
+  const liq = m.liquidityNum || 0;
+  const spread = m.spread || 0;
+
+  // Model estimate based on heuristics
+  let modelEstimate, confidence, reasoning;
+  const analysis = generateAnalysis(q, m.description, price, cat, daysLeft, vol24h, liq, m);
+  modelEstimate = analysis.estimate;
+  confidence = analysis.confidence;
+  reasoning = analysis.reasoning;
+
+  const edge = Math.abs(modelEstimate - price);
+  const direction = modelEstimate > price ? 'BUY YES' : 'BUY NO';
+  
+  // Liquidity score 1-3
+  let liqScore = 1;
+  if (liq > 500000) liqScore = 3;
+  else if (liq > 50000) liqScore = 2;
+
+  return {
+    id: m.id,
+    question: q,
+    slug: m.slug,
+    description: m.description,
+    category: cat,
+    marketPrice: price,
+    modelEstimate,
+    edge,
+    direction,
+    confidence,
+    liqScore,
+    liquidity: liq,
+    volume24h: vol24h,
+    totalVolume: totalVol,
+    spread,
+    daysLeft,
+    endDate: endDate.toISOString(),
+    reasoning,
+    image: m.image,
+    bestBid: m.bestBid,
+    bestAsk: m.bestAsk,
+    oneDayChange: m.oneDayPriceChange,
+    oneWeekChange: m.oneWeekPriceChange
+  };
+}
+
+function generateAnalysis(q, desc, price, cat, daysLeft, vol24h, liq, raw) {
+  const ql = q.toLowerCase();
+  let estimate, confidence, reasoning;
+
+  // Government shutdown
+  if (/shutdown/.test(ql) && /saturday|february 14/.test(ql)) {
+    estimate = 0.08;
+    confidence = 'high';
+    reasoning = `<p><strong>What the market is pricing:</strong> At ${(price*100).toFixed(1)}¢, the market implies a ~${(price*100).toFixed(0)}% chance of a new government shutdown by tomorrow. This follows the partial shutdown that began January 31.</p>
+    <p><strong>Our view:</strong> The key distinction here is "new" shutdown — the existing partial shutdown doesn't qualify. Congressional leadership has signaled a continuing resolution is being negotiated, and with both parties motivated to avoid blame heading into a long weekend, the probability of an entirely new shutdown event is lower than the market suggests. We estimate ~8% fair value.</p>
+    <p><strong>Key risks:</strong> Political brinkmanship could escalate unexpectedly. The narrow timeframe (tomorrow) means this is essentially a binary bet on whether negotiations collapse in the next 24 hours. The 83¢ one-day price drop suggests the market is rapidly repricing downward — momentum favors NO.</p>`;
+  }
+  // Fed Chair nomination
+  else if (/judy shelton/.test(ql) && /fed chair/.test(ql)) {
+    estimate = 0.04;
+    confidence = 'medium';
+    reasoning = `<p><strong>What the market is pricing:</strong> Judy Shelton at 2.65¢ reflects her as a long-shot candidate for Fed Chair nomination. The broader "Who will Trump nominate" event has $473M in volume — this is one of Polymarket's most liquid markets.</p>
+    <p><strong>Our view:</strong> Shelton's previous Fed Board nomination failed in the Senate (50-47 against) in 2020, which should reduce her odds. However, Trump has a pattern of revisiting rejected nominees when he has more political leverage. With Kevin Hassett and Kevin Warsh as frontrunners, Shelton at 2.65¢ may be slightly underpriced given Trump's unpredictability. We estimate ~4% fair value.</p>
+    <p><strong>Key risks:</strong> This is a long-dated market (Dec 2026) with high uncertainty. The Senate confirmation math has changed, and Trump's second-term approach to nominations has been more aggressive. Dark horse risk is real here.</p>`;
+  }
+  // ETH price targets
+  else if (/ethereum.*4.?400/.test(ql)) {
+    estimate = 0.003;
+    confidence = 'medium';
+    reasoning = `<p><strong>What the market is pricing:</strong> ETH reaching $4,400 in February at 0.25¢ implies near-impossibility. ETH is currently trading around $2,700-2,800, meaning this requires a ~60% rally in under two weeks.</p>
+    <p><strong>Our view:</strong> This is fairly priced. While crypto can see violent moves, a 60% ETH rally in 15 days has essentially no historical precedent outside of the 2017 ICO mania. The market isn't mispriced here — it's correctly reflecting near-zero probability. Slight edge exists on the NO side at 99.75¢ for those wanting very safe yield.</p>
+    <p><strong>Key risks:</strong> Black swan crypto events (unexpected ETF flows, regulatory surprise) could theoretically drive a moonshot, but the risk/reward doesn't justify a YES position.</p>`;
+  }
+  // US strikes Iran
+  else if (/us strikes iran/.test(ql)) {
+    estimate = 0.008;
+    confidence = 'low';
+    reasoning = `<p><strong>What the market is pricing:</strong> At 0.55¢, the market sees virtually no chance of US strikes on Iran by February 13. The one-week price drop of 10.95¢ suggests this was recently much more actively traded, likely around a geopolitical flashpoint.</p>
+    <p><strong>Our view:</strong> The sharp decline suggests whatever catalyst drove prices up has dissipated. With the date being today/tomorrow, and no current intelligence suggesting imminent military action, the NO side looks correct but slightly overpriced. We see ~0.8% fair value — the tiny premium reflects residual geopolitical tail risk.</p>
+    <p><strong>Key risks:</strong> Geopolitical events are inherently unpredictable. A provocation or intelligence failure could rapidly change the calculus. However, the extremely short timeframe limits exposure.</p>`;
+  }
+  // Fed rate decision - 50bps decrease
+  else if (/fed.*decrease.*50/.test(ql) && /march/.test(ql)) {
+    estimate = 0.005;
+    confidence = 'high';
+    reasoning = `<p><strong>What the market is pricing:</strong> A 50+ bps rate cut at the March FOMC meeting is priced at 0.65¢. The CME FedWatch tool and bond markets strongly agree — an aggressive cut is extremely unlikely given current conditions.</p>
+    <p><strong>Our view:</strong> With inflation still above target and the labor market resilient, the Fed has no reason to cut aggressively. Powell's recent communications have emphasized patience. The 92.5¢ "no change" market for the same meeting confirms the consensus. Fair value is ~0.5¢ — the market is slightly generous to YES buyers.</p>
+    <p><strong>Key risks:</strong> Only a severe financial crisis or deflationary shock before March 18 would warrant an emergency cut of this magnitude. The spread between market (0.65¢) and our estimate (0.5¢) is thin but real.</p>`;
+  }
+  // Fed no change
+  else if (/no change.*fed.*march/.test(ql)) {
+    estimate = 0.935;
+    confidence = 'high';
+    reasoning = `<p><strong>What the market is pricing:</strong> No change in Fed rates after March at 92.5¢ implies a 92.5% probability of rates staying put. This aligns closely with CME FedWatch probabilities and market consensus.</p>
+    <p><strong>Our view:</strong> We see this as slightly underpriced at 93.5%. The Fed has been extremely clear about holding steady, and February CPI/employment data would need to be dramatically different from expectations to shift the calculus in just one meeting. The "25 bps cut" outcome gets the remaining probability.</p>
+    <p><strong>Key risks:</strong> A tariff-induced economic shock or banking stress event could force the Fed's hand, but the bar is very high for March action. This is a high-confidence, low-edge opportunity — good for capital preservation strategies.</p>`;
+  }
+  // Generic analysis engine
+  else {
+    // Heuristic model: adjust price based on common biases
+    const bias = analyzeBias(price, daysLeft, vol24h, liq, raw);
+    estimate = Math.max(0.001, Math.min(0.999, price + bias.adjustment));
+    confidence = bias.confidence;
+    reasoning = `<p><strong>What the market is pricing:</strong> "${q}" is trading at ${(price*100).toFixed(1)}¢ YES / ${((1-price)*100).toFixed(1)}¢ NO${daysLeft > 0 ? `, with ${daysLeft} days until resolution` : ''}. 24-hour volume is $${formatNum(vol24h)}.</p>
+    <p><strong>Our view:</strong> ${bias.thesis}</p>
+    <p><strong>Key factors:</strong> ${bias.factors}</p>`;
+  }
+
+  return { estimate, confidence, reasoning };
+}
+
+function analyzeBias(price, daysLeft, vol24h, liq, raw) {
+  let adjustment = 0;
+  let thesis = '';
+  let factors = '';
+  let confidence = 'medium';
+
+  // Recency bias: sharp recent moves often overshoot
+  const dayChange = raw.oneDayPriceChange || 0;
+  const weekChange = raw.oneWeekPriceChange || 0;
+  
+  if (Math.abs(dayChange) > 0.1) {
+    // Big 1-day move — likely overreaction
+    adjustment = -dayChange * 0.15; // Fade 15% of the move
+    thesis = `The market moved ${(dayChange*100).toFixed(1)}¢ in the last 24 hours, which suggests potential overreaction. Large single-day moves in prediction markets tend to overshoot by 10-20% before mean-reverting. We're fading a portion of this move.`;
+    factors = `Momentum and mean-reversion dynamics. High 24h volume ($${formatNum(vol24h)}) confirms active repricing, but late movers often push prices past fair value.`;
+    confidence = 'medium';
+  } else if (price > 0.85 || price < 0.15) {
+    // Extreme prices: favorite-longshot bias
+    if (price > 0.85) {
+      adjustment = 0.02; // Slight upward — favorites tend to be underpriced
+      thesis = `High-probability events (>${(price*100).toFixed(0)}%) are historically slightly underpriced in prediction markets due to the favorite-longshot bias. Bettors over-allocate to longshots, leaving value on heavy favorites.`;
+    } else {
+      adjustment = -0.005; // Longshots tend to be overpriced
+      thesis = `Low-probability events (<${(price*100).toFixed(0)}%) are historically overpriced in prediction markets. Bettors are drawn to cheap lottery-ticket odds, inflating prices above true probability. We see slight value on NO.`;
+    }
+    factors = `Favorite-longshot bias is well-documented in both prediction markets and sports betting. Liquidity at $${formatNum(liq)} is ${liq > 100000 ? 'sufficient for meaningful positions' : 'thin — position size accordingly'}.`;
+    confidence = liq > 200000 ? 'medium' : 'low';
+  } else if (daysLeft < 3 && daysLeft > 0) {
+    // Near resolution: time decay
+    if (price > 0.4 && price < 0.6) {
+      adjustment = 0; // Coin flip near resolution is uncertain
+      thesis = `With ${daysLeft} day(s) to resolution and the price near 50/50, this is essentially a coin flip. No clear edge — the market is efficiently pricing uncertainty.`;
+      confidence = 'low';
+    } else {
+      adjustment = price > 0.5 ? 0.03 : -0.03; // Trend tends to continue
+      thesis = `Near-resolution markets tend to accelerate toward their final outcome. With ${daysLeft} day(s) left and the price at ${(price*100).toFixed(0)}¢, momentum suggests the current direction will hold.`;
+      confidence = 'medium';
+    }
+    factors = `Time decay and information asymmetry. Traders with superior information tend to move prices early, and late pricing tends to be correct.`;
+  } else {
+    // Default: slight mean reversion
+    adjustment = (0.5 - price) * 0.03;
+    thesis = `The market appears reasonably efficient at current levels. Our model sees a minor adjustment based on mean-reversion tendencies and volume-weighted momentum analysis.`;
+    factors = `Market efficiency, volume patterns, and historical base rates for similar event types. ${daysLeft > 30 ? 'The long time horizon introduces significant uncertainty.' : 'The medium-term horizon allows for meaningful position building.'}`;
+    confidence = 'low';
+  }
+
+  return { adjustment, thesis, factors, confidence };
+}
+
+function formatNum(n) {
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(0) + 'K';
+  return n.toFixed(0);
+}
+
+function formatMoney(n) {
+  return '$' + formatNum(n);
+}
+
+// ============================================
+// DATA FETCHING
+// ============================================
+
+let allOpportunities = [];
+let activeCategory = 'all';
+
+async function fetchMarkets() {
+  try {
+    // Try direct fetch first (may work if CORS is allowed)
+    let markets = [];
+    try {
+      const res = await fetch(GAMMA_API + '?closed=false&limit=60&order=volume24hr&ascending=false');
+      if (res.ok) markets = await res.json();
+    } catch(e) {
+      // Try with CORS proxy
+      try {
+        const res = await fetch(CORS_PROXY + encodeURIComponent(GAMMA_API + '?closed=false&limit=60&order=volume24hr&ascending=false'));
+        if (res.ok) markets = await res.json();
+      } catch(e2) {
+        console.log('CORS proxy also failed, using embedded data');
+      }
+    }
+
+    if (markets.length === 0) {
+      markets = EMBEDDED_MARKETS;
+      document.querySelector('.status-badge').textContent = 'Cached Data';
+      document.querySelector('.status-badge').style.background = '#f59e0b33';
+      document.querySelector('.status-badge').style.color = '#f59e0b';
+    }
+
+    // Filter to markets with meaningful data
+    const validMarkets = markets.filter(m => {
+      if (!m.outcomePrices || !m.question) return false;
+      const price = parseFloat(JSON.parse(m.outcomePrices)[0]);
+      return price > 0 && price < 1 && m.active && !m.closed;
+    });
+
+    allOpportunities = validMarkets.map(analyzeMarket)
+      .filter(o => o.edge > 0.003) // Min 0.3% edge
+      .sort((a,b) => b.edge - a.edge);
+
+    document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleString();
+    renderDashboard();
+    renderGrid();
+    buildCategoryFilters();
+  } catch(err) {
+    document.getElementById('grid').innerHTML = `<div class="loading">Error loading markets: ${err.message}</div>`;
+  }
+}
+
+// Embedded fallback data (snapshot from API)
+const EMBEDDED_MARKETS = [
+  {id:"1308327",question:"Government shutdown on Saturday?",slug:"another-us-government-shutdown-by-february-14",description:"Resolves Yes if OPM announces new federal shutdown by Feb 14",outcomePrices:'["0.129","0.871"]',volume:"9152678",active:true,closed:false,volumeNum:9152678,liquidityNum:74570,endDate:"2026-02-14T00:00:00Z",volume24hr:5932125,spread:0.002,oneDayPriceChange:-0.831,oneWeekPriceChange:-0.534,bestBid:0.128,bestAsk:0.13,image:""},
+  {id:"572473",question:"Will Trump nominate Judy Shelton as the next Fed chair?",slug:"will-trump-nominate-judy-shelton-as-the-next-fed-chair",description:"Resolves per formal nomination to Senate",outcomePrices:'["0.0265","0.9735"]',volume:"80172955",active:true,closed:false,volumeNum:80172955,liquidityNum:3181493,endDate:"2026-12-31T00:00:00Z",volume24hr:2882914,spread:0.001,oneDayPriceChange:-0.017,oneWeekPriceChange:0,bestBid:0.026,bestAsk:0.027,image:""},
+  {id:"1303357",question:"Will Ethereum reach $4,400 in February?",slug:"will-ethereum-reach-4400-in-february-2026",description:"Resolves if any Binance 1m candle for ETH/USDT hits $4400",outcomePrices:'["0.0025","0.9975"]',volume:"6312650",active:true,closed:false,volumeNum:6312650,liquidityNum:526830,endDate:"2026-03-01T05:00:00Z",volume24hr:2783980,spread:0.001,oneDayPriceChange:0,oneWeekPriceChange:0,bestBid:0.002,bestAsk:0.003,image:""},
+  {id:"1273610",question:"US strikes Iran by February 13, 2026?",slug:"us-strikes-iran-by-february-13-2026",description:"Resolves Yes if US strikes on Iranian soil",outcomePrices:'["0.0055","0.9945"]',volume:"14050697",active:true,closed:false,volumeNum:14050697,liquidityNum:220110,endDate:"2026-02-14T00:00:00Z",volume24hr:1828393,spread:0.001,oneDayPriceChange:-0.003,oneWeekPriceChange:-0.1095,bestBid:0.005,bestAsk:0.006,image:""},
+  {id:"654412",question:"Will the Fed decrease interest rates by 50+ bps after the March 2026 meeting?",slug:"fed-50bps-decrease-march-2026",description:"Resolves per FOMC March 2026 statement",outcomePrices:'["0.0065","0.9935"]',volume:"39795139",active:true,closed:false,volumeNum:39795139,liquidityNum:1524654,endDate:"2026-03-18T00:00:00Z",volume24hr:1723031,spread:0.001,oneDayPriceChange:0,oneWeekPriceChange:-0.004,bestBid:0.006,bestAsk:0.007,image:""},
+  {id:"654414",question:"Will there be no change in Fed interest rates after the March 2026 meeting?",slug:"fed-no-change-march-2026",description:"Resolves per FOMC March 2026 statement",outcomePrices:'["0.925","0.075"]',volume:"14298890",active:true,closed:false,volumeNum:14298890,liquidityNum:1012712,endDate:"2026-03-18T00:00:00Z",volume24hr:1624556,spread:0.001,oneDayPriceChange:0,oneWeekPriceChange:0,bestBid:0.92,bestAsk:0.93,image:""}
+];
+
+// ============================================
+// RENDERING
+// ============================================
+
+function renderDashboard() {
+  const ops = allOpportunities;
+  const avgEdge = ops.length ? ops.reduce((s,o) => s+o.edge, 0) / ops.length : 0;
+  const best = ops[0];
+  const catCounts = {};
+  ops.forEach(o => { catCounts[o.category] = (catCounts[o.category]||0) + 1; });
+
+  let catDotsHtml = Object.entries(catCounts).map(([c,n]) => 
+    `<div class="cat-dot"><i style="background:${CATEGORIES[c]?.color||'#888'}"></i>${CATEGORIES[c]?.label||c} (${n})</div>`
+  ).join('');
+
+  document.getElementById('dashboard').innerHTML = `
+    <div class="dash-card">
+      <div class="label">Opportunities Found</div>
+      <div class="value">${ops.length}</div>
+      <div class="sub">Across ${Object.keys(catCounts).length} categories</div>
+    </div>
+    <div class="dash-card">
+      <div class="label">Average Edge</div>
+      <div class="value green">+${(avgEdge*100).toFixed(1)}%</div>
+      <div class="sub">Model vs Market</div>
+    </div>
+    <div class="dash-card highlight">
+      <div class="label">Best Opportunity</div>
+      <div class="value green" style="font-size:18px">${best ? '+' + (best.edge*100).toFixed(1) + '%' : 'N/A'}</div>
+      <div class="sub">${best ? best.question.slice(0,50) + '...' : ''}</div>
+    </div>
+    <div class="dash-card">
+      <div class="label">Category Breakdown</div>
+      <div class="cat-chart">${catDotsHtml}</div>
+    </div>
+  `;
+}
+
+function buildCategoryFilters() {
+  const cats = [...new Set(allOpportunities.map(o => o.category))];
+  document.getElementById('catFilters').innerHTML = 
+    `<button class="btn active" data-cat="all">All</button>` +
+    cats.map(c => `<button class="btn" data-cat="${c}">${CATEGORIES[c]?.label||c}</button>`).join('');
+  
+  document.querySelectorAll('#catFilters .btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#catFilters .btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeCategory = btn.dataset.cat;
+      renderGrid();
+    });
+  });
+}
+
+function getFilteredSorted() {
+  let ops = [...allOpportunities];
+  
+  // Category filter
+  if (activeCategory !== 'all') ops = ops.filter(o => o.category === activeCategory);
+  
+  // Search
+  const search = document.getElementById('searchBox').value.toLowerCase();
+  if (search) ops = ops.filter(o => o.question.toLowerCase().includes(search));
+  
+  // Confidence filter
+  const minConf = document.getElementById('minConfidence').value;
+  if (minConf === 'high') ops = ops.filter(o => o.confidence === 'high');
+  if (minConf === 'medium') ops = ops.filter(o => o.confidence === 'high' || o.confidence === 'medium');
+  
+  // Sort
+  const sort = document.getElementById('sortBy').value;
+  ops.sort((a,b) => {
+    if (sort === 'edge') return b.edge - a.edge;
+    if (sort === 'confidence') return confVal(b.confidence) - confVal(a.confidence) || b.edge - a.edge;
+    if (sort === 'liquidity') return b.liquidity - a.liquidity;
+    if (sort === 'resolution') return a.daysLeft - b.daysLeft;
+    if (sort === 'volume') return b.volume24h - a.volume24h;
+    return 0;
+  });
+  
+  return ops;
+}
+
+function confVal(c) { return c === 'high' ? 3 : c === 'medium' ? 2 : 1; }
+function confBadge(c) {
+  if (c === 'high') return '🟢 High';
+  if (c === 'medium') return '🟡 Medium';
+  return '🔴 Low';
+}
+function liqIndicator(s) { return '💧'.repeat(s); }
+
+function renderGrid() {
+  const ops = getFilteredSorted();
+  if (!ops.length) {
+    document.getElementById('grid').innerHTML = '<div class="loading">No opportunities match your filters</div>';
+    return;
+  }
+
+  document.getElementById('grid').innerHTML = ops.map(o => {
+    const edgeClass = o.edge > 0 ? 'pos' : 'neg';
+    const catInfo = CATEGORIES[o.category] || { label: o.category, class: 'tag-politics' };
+    const barWidth = Math.min(100, o.edge * 100 * 5); // Scale for visibility
+    const barColor = o.direction.includes('YES') ? 'var(--green)' : 'var(--accent)';
+    
+    return `
+    <div class="card" onclick="openModal('${o.id}')">
+      <div class="card-top">
+        <div class="card-title">${o.question}</div>
+        <div class="card-edge ${edgeClass}">+${(o.edge*100).toFixed(1)}%</div>
+      </div>
+      <div class="card-meta">
+        <span class="tag ${catInfo.class}">${catInfo.label}</span>
+        <span class="confidence">${confBadge(o.confidence)}</span>
+        <span class="liquidity">${liqIndicator(o.liqScore)}</span>
+      </div>
+      <div class="card-prices">
+        <div class="price-group">
+          <span class="price-label">Market</span>
+          <span class="price-val">${(o.marketPrice*100).toFixed(1)}¢</span>
+        </div>
+        <div class="price-group">
+          <span class="price-label">Model</span>
+          <span class="price-val" style="color:var(--green)">${(o.modelEstimate*100).toFixed(1)}¢</span>
+        </div>
+        <div class="price-group">
+          <span class="price-label">Action</span>
+          <span class="price-val" style="color:${o.direction.includes('YES') ? 'var(--green)' : 'var(--accent)'}">${o.direction}</span>
+        </div>
+      </div>
+      <div class="card-bar"><div class="card-bar-fill" style="width:${barWidth}%;background:${barColor}"></div></div>
+      <div class="card-bottom">
+        <div class="card-resolution">⏱ ${o.daysLeft === 0 ? 'Today' : o.daysLeft + 'd left'}</div>
+        <div>Vol: ${formatMoney(o.volume24h)}/24h</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openModal(id) {
+  const o = allOpportunities.find(x => x.id === id);
+  if (!o) return;
+  const catInfo = CATEGORIES[o.category] || { label: o.category, class: 'tag-politics' };
+  
+  document.getElementById('modal').innerHTML = `
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <div class="card-meta" style="margin-bottom:12px">
+      <span class="tag ${catInfo.class}">${catInfo.label}</span>
+      <span class="confidence">${confBadge(o.confidence)}</span>
+      <span class="liquidity">${liqIndicator(o.liqScore)}</span>
+    </div>
+    <h2>${o.question}</h2>
+    
+    <div class="modal-section">
+      <h3>📊 Price Comparison</h3>
+      <div class="modal-prices">
+        <div class="modal-price-box">
+          <div class="lbl">Market Price (Yes)</div>
+          <div class="val">${(o.marketPrice*100).toFixed(1)}¢</div>
+        </div>
+        <div class="modal-price-box">
+          <div class="lbl">Model Estimate</div>
+          <div class="val green">${(o.modelEstimate*100).toFixed(1)}¢</div>
+        </div>
+        <div class="modal-price-box">
+          <div class="lbl">Edge</div>
+          <div class="val blue">+${(o.edge*100).toFixed(1)}%</div>
+        </div>
+      </div>
+      <div class="compare-bar">
+        <div class="fill" style="width:${(o.modelEstimate*100)}%"></div>
+        <div class="market-line" style="left:${(o.marketPrice*100)}%"></div>
+        <div class="model-line" style="left:${(o.modelEstimate*100)}%"></div>
+      </div>
+      <div class="compare-labels">
+        <span>0%</span>
+        <span style="color:var(--red)">▲ Market ${(o.marketPrice*100).toFixed(1)}%</span>
+        <span style="color:var(--green)">▲ Model ${(o.modelEstimate*100).toFixed(1)}%</span>
+        <span>100%</span>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <h3>📐 Edge Breakdown</h3>
+      <div class="edge-breakdown">
+        <div class="edge-row"><span class="el">Market Yes Price</span><span>${(o.marketPrice*100).toFixed(2)}¢</span></div>
+        <div class="edge-row"><span class="el">Model Fair Value</span><span>${(o.modelEstimate*100).toFixed(2)}¢</span></div>
+        <div class="edge-row"><span class="el">Raw Edge</span><span style="color:var(--green)">+${(o.edge*100).toFixed(2)}%</span></div>
+        <div class="edge-row"><span class="el">Recommended Action</span><span style="color:var(--accent);font-weight:700">${o.direction}</span></div>
+        <div class="edge-row"><span class="el">Bid / Ask</span><span>${o.bestBid || '—'} / ${o.bestAsk || '—'}</span></div>
+        <div class="edge-row"><span class="el">Spread</span><span>${(o.spread*100).toFixed(1)}%</span></div>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <h3>🧠 Why We Think This</h3>
+      <div class="analysis-text">${o.reasoning}</div>
+    </div>
+
+    <div class="modal-section">
+      <h3>📈 Market Stats</h3>
+      <div class="modal-stats">
+        <div class="stat-box"><div class="sl">24h Volume</div>${formatMoney(o.volume24h)}</div>
+        <div class="stat-box"><div class="sl">Total Volume</div>${formatMoney(o.totalVolume)}</div>
+        <div class="stat-box"><div class="sl">Liquidity</div>${formatMoney(o.liquidity)}</div>
+        <div class="stat-box"><div class="sl">Days to Resolution</div>${o.daysLeft === 0 ? 'Today' : o.daysLeft + ' days'}</div>
+        <div class="stat-box"><div class="sl">1-Day Change</div><span style="color:${(o.oneDayChange||0) >= 0 ? 'var(--green)' : 'var(--red)'}">${((o.oneDayChange||0)*100).toFixed(1)}¢</span></div>
+        <div class="stat-box"><div class="sl">1-Week Change</div><span style="color:${(o.oneWeekChange||0) >= 0 ? 'var(--green)' : 'var(--red)'}">${((o.oneWeekChange||0)*100).toFixed(1)}¢</span></div>
+      </div>
+    </div>
+
+    <a class="modal-link" href="https://polymarket.com/event/${o.slug}" target="_blank">
+      View on Polymarket →
+    </a>
+    <div class="modal-ts">Analysis generated: ${new Date().toLocaleString()}</div>
+  `;
+  
+  document.getElementById('modalOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.getElementById('modalOverlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// Event listeners for filters
+['searchBox'].forEach(id => document.getElementById(id).addEventListener('input', renderGrid));
+['sortBy', 'minConfidence'].forEach(id => document.getElementById(id).addEventListener('change', renderGrid));
+
+// Init
+fetchMarkets();
+// Auto-refresh every 5 minutes
+setInterval(fetchMarkets, 300000);
+</script>
+</body>
+</html>

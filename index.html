@@ -119,6 +119,101 @@ select:hover,.btn:hover{border-color:var(--accent)}
 .compare-bar .fill{position:absolute;top:0;left:0;height:100%;background:linear-gradient(90deg,var(--green-dim),transparent);border-radius:8px}
 .compare-labels{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)}
 
+/* Tabs */
+.tab-bar{display:flex;gap:0;padding:0 32px;border-bottom:1px solid var(--border);background:var(--bg)}
+.tab-btn{padding:12px 24px;font-size:14px;font-weight:600;color:var(--text-dim);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;transition:all .2s}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.portfolio-summary-bar{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border-radius:8px;background:var(--card);border:1px solid var(--border);font-size:12px;font-weight:600;cursor:pointer}
+.portfolio-summary-bar:hover{border-color:var(--accent)}
+
+/* Mock Trade Button on cards */
+.mock-trade-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text-dim);font-size:11px;cursor:pointer;transition:all .2s;white-space:nowrap}
+.mock-trade-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--card-hover)}
+
+/* Trade Form Modal */
+.trade-form-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
+.trade-form-overlay.open{display:flex}
+.trade-form{background:var(--card);border:1px solid var(--border);border-radius:16px;max-width:480px;width:100%;padding:28px;position:relative}
+.trade-form h3{font-size:18px;font-weight:700;margin-bottom:16px}
+.trade-form label{display:block;font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;margin-top:12px}
+.trade-form input,.trade-form select,.trade-form textarea{width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;outline:none;font-family:inherit}
+.trade-form input:focus,.trade-form select:focus,.trade-form textarea:focus{border-color:var(--accent)}
+.trade-form textarea{resize:vertical;min-height:60px}
+.trade-form-actions{display:flex;gap:10px;margin-top:20px}
+.trade-form-actions button{flex:1;padding:10px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer}
+.btn-confirm{background:var(--green);color:#000}
+.btn-confirm:hover{opacity:.9}
+.btn-cancel{background:var(--border);color:var(--text)}
+.btn-cancel:hover{background:var(--card-hover)}
+
+/* Portfolio Tab Styles */
+.portfolio-dashboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;padding:24px 32px;border-bottom:1px solid var(--border)}
+.portfolio-section{padding:24px 32px}
+.portfolio-section h3{font-size:16px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.portfolio-table{width:100%;border-collapse:collapse;font-size:13px}
+.portfolio-table th{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.portfolio-table td{padding:10px 12px;border-bottom:1px solid var(--border)}
+.portfolio-table tr:hover{background:var(--card-hover)}
+.close-pos-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--red);background:transparent;color:var(--red);font-size:11px;cursor:pointer;font-weight:600}
+.close-pos-btn:hover{background:var(--red-dim)}
+.pnl-pos{color:var(--green)}
+.pnl-neg{color:var(--red)}
+.reasoning-toggle{color:var(--accent);cursor:pointer;font-size:11px}
+.reasoning-expand{display:none;padding:8px 12px;background:var(--bg);border-radius:8px;margin-top:6px;font-size:12px;color:var(--text-dim);line-height:1.5}
+.reasoning-expand.open{display:block}
+.pnl-chart-container{padding:24px 32px}
+.pnl-chart-container h3{font-size:16px;font-weight:700;margin-bottom:16px}
+.pnl-chart-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;height:200px;position:relative}
+.empty-state{text-align:center;padding:40px;color:var(--text-dim);font-size:14px}
+.manual-trade-btn{padding:10px 20px;border-radius:8px;border:1px solid var(--accent);background:transparent;color:var(--accent);font-size:14px;font-weight:600;cursor:pointer;margin-left:auto}
+.manual-trade-btn:hover{background:var(--accent);color:#fff}
+
+/* Price Ticker */
+.price-ticker{display:flex;gap:16px;padding:12px 32px;border-bottom:1px solid var(--border);background:#0d0e14;overflow-x:auto;flex-wrap:wrap}
+.price-ticker .ticker-item{display:flex;align-items:center;gap:8px;font-size:13px;white-space:nowrap}
+.price-ticker .ticker-asset{font-weight:600;color:var(--text)}
+.price-ticker .ticker-price{color:var(--text-dim)}
+.price-ticker .ticker-change{font-weight:600;font-size:12px}
+.price-ticker .ticker-change.up{color:var(--green)}
+.price-ticker .ticker-change.down{color:var(--red)}
+
+/* Top 10 Section */
+.top10-controls{padding:16px 32px;display:flex;gap:12px;align-items:center;border-bottom:1px solid var(--border)}
+.btn-primary{padding:12px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,var(--accent),#6366f1);color:#fff;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(77,142,247,.3)}
+.btn-secondary{padding:10px 18px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text-dim);font-size:13px;cursor:pointer}
+.btn-secondary:hover{border-color:var(--accent);color:var(--text)}
+.btn-secondary.active{border-color:var(--accent);color:var(--accent)}
+
+/* Ranked list for top 10 */
+.ranked-list{padding:24px 32px;display:flex;flex-direction:column;gap:12px}
+.ranked-item{display:flex;align-items:stretch;gap:16px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;position:relative}
+.ranked-item:hover{border-color:var(--accent);background:var(--card-hover);transform:translateY(-2px)}
+.rank-badge{min-width:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:var(--accent);border-right:1px solid var(--border);padding-right:16px}
+.rank-badge.gold{color:#fbbf24}
+.rank-badge.silver{color:#94a3b8}
+.rank-badge.bronze{color:#cd7f32}
+.ranked-body{flex:1;min-width:0}
+.ranked-title{font-size:15px;font-weight:600;margin-bottom:8px;line-height:1.4}
+.ranked-scores{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;font-size:12px}
+.ranked-scores .score-pill{padding:3px 8px;border-radius:6px;background:var(--bg);color:var(--text-dim)}
+.ranked-scores .score-pill strong{color:var(--text)}
+.ranked-reasoning{font-size:13px;color:var(--text-dim);line-height:1.5}
+.ranked-right{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;min-width:100px;gap:4px}
+.ranked-roi{font-size:22px;font-weight:700;color:var(--green)}
+.ranked-action{font-size:12px;font-weight:600;padding:4px 10px;border-radius:6px}
+.ranked-action.buy-yes{background:var(--green-dim);color:var(--green)}
+.ranked-action.buy-no{background:#4d8ef722;color:var(--accent)}
+
+/* Cross-market flag */
+.cross-market-flag{font-size:11px;padding:3px 8px;border-radius:6px;background:#a855f722;color:var(--purple);font-weight:600}
+
+/* Live price note */
+.live-price-note{font-size:12px;color:var(--cyan);margin-top:4px;display:flex;align-items:center;gap:4px}
+
 /* Scrollbar */
 ::-webkit-scrollbar{width:6px}
 ::-webkit-scrollbar-track{background:var(--bg)}
@@ -149,12 +244,21 @@ select:hover,.btn:hover{border-color:var(--accent)}
 <div class="header">
 <h1><span>📊</span> Polymarket Scanner</h1>
 <div class="header-meta">
+<div class="portfolio-summary-bar" id="portfolioSummaryBar" onclick="switchTab('portfolio')" title="View portfolio">📈 Portfolio: $10,000 (+0.0%)</div>
 <span class="status-badge"><span class="live-dot"></span> Live Data</span>
 <span id="lastUpdated">Loading...</span>
 <button class="btn" onclick="fetchMarkets()" style="padding:6px 12px;font-size:12px;cursor:pointer" title="Refresh now">🔄 Refresh</button>
 </div>
 </div>
 
+<div class="tab-bar">
+<button class="tab-btn active" data-tab="scanner" onclick="switchTab('scanner')">🔍 Scanner</button>
+<button class="tab-btn" data-tab="portfolio" onclick="switchTab('portfolio')">📈 Mock Portfolio</button>
+</div>
+
+<div class="tab-content active" id="tab-scanner">
+
+<div class="price-ticker" id="priceTicker"></div>
 <div class="dashboard" id="dashboard"></div>
 
 <div class="controls">
@@ -174,10 +278,41 @@ select:hover,.btn:hover{border-color:var(--accent)}
 </select>
 </div>
 
+<div class="top10-controls" id="top10Controls">
+<button class="btn-primary" id="btnTop10" onclick="showTop10()">🎯 Top 10 Opportunities</button>
+<button class="btn-secondary active" id="btnAllMarkets" onclick="showAllMarkets()">📋 All Markets</button>
+<span id="viewLabel" style="color:var(--text-dim);font-size:13px;margin-left:8px"></span>
+</div>
+<div class="ranked-list" id="top10List" style="display:none"></div>
 <div class="grid" id="grid"><div class="loading"><div class="spinner"></div>Fetching markets from Polymarket...</div></div>
+
+</div><!-- end tab-scanner -->
+
+<div class="tab-content" id="tab-portfolio">
+<div class="portfolio-dashboard" id="portfolioDashboard"></div>
+<div class="pnl-chart-container">
+<h3>📊 Portfolio Value Over Time</h3>
+<div class="pnl-chart-wrap"><canvas id="pnlChart" style="width:100%;height:100%"></canvas></div>
+</div>
+<div class="portfolio-section">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+<h3 style="margin-bottom:0">📂 Open Positions</h3>
+<button class="manual-trade-btn" onclick="openTradeForm()">+ New Trade</button>
+</div>
+<div id="openPositionsTable"></div>
+</div>
+<div class="portfolio-section">
+<h3>📜 Closed Trades</h3>
+<div id="closedTradesTable"></div>
+</div>
+</div>
 
 <div class="modal-overlay" id="modalOverlay">
 <div class="modal" id="modal"></div>
+</div>
+
+<div class="trade-form-overlay" id="tradeFormOverlay">
+<div class="trade-form" id="tradeForm"></div>
 </div>
 
 <script>
@@ -775,10 +910,15 @@ function formatMoney(n) {
 let allOpportunities = [];
 let activeCategory = 'all';
 let totalScanned = 0;
+let livePrices = {};
+let crossMarketGroups = {};
+let currentView = 'all'; // 'top10' or 'all'
 
 async function fetchMarkets() {
   try {
     let markets = [];
+    
+    let apiLivePrices = {};
     
     // Use our own Vercel serverless proxy to avoid CORS
     try {
@@ -786,9 +926,18 @@ async function fetchMarkets() {
       if (res.ok) {
         const data = await res.json();
         markets = data.markets || [];
+        apiLivePrices = data.livePrices || {};
       }
     } catch(e) {
       console.log('Proxy API failed, trying direct...');
+    }
+    
+    // Also try fetching prices directly if not from API
+    if (Object.keys(apiLivePrices).length <= 1) {
+      try {
+        const pr = await fetch('/api/prices');
+        if (pr.ok) apiLivePrices = await pr.json();
+      } catch(e) {}
     }
     
     // Fallback: try direct API (works if CORS allows)
@@ -817,6 +966,12 @@ async function fetchMarkets() {
       document.querySelector('.status-badge').style.background = 'var(--green-dim)';
       document.querySelector('.status-badge').style.color = 'var(--green)';
     }
+    
+    // Store live prices and render ticker
+    if (apiLivePrices && Object.keys(apiLivePrices).length > 0) {
+      livePrices = apiLivePrices;
+      renderPriceTicker();
+    }
 
     // Dedupe by id
     const seen = new Set();
@@ -832,13 +987,65 @@ async function fetchMarkets() {
     });
 
     totalScanned = validMarkets.length;
-    allOpportunities = validMarkets.map(analyzeMarket)
-      .filter(o => o.edge > 0.001) // Min 0.1% edge
+    
+    // Cross-market consistency: group by negRiskMarketID
+    crossMarketGroups = {};
+    for (const m of validMarkets) {
+      const gid = m.negRiskMarketID;
+      if (gid) {
+        if (!crossMarketGroups[gid]) crossMarketGroups[gid] = [];
+        try {
+          const p = parseFloat(JSON.parse(m.outcomePrices)[0]);
+          crossMarketGroups[gid].push({ id: m.id, question: m.question, yesPrice: p });
+        } catch(e) {}
+      }
+    }
+    // Calculate group sums and flag inconsistencies
+    const crossMarketFlags = {};
+    for (const [gid, items] of Object.entries(crossMarketGroups)) {
+      if (items.length < 2) continue;
+      const sum = items.reduce((s, i) => s + i.yesPrice, 0);
+      const deviation = Math.abs(sum - 1.0);
+      if (deviation > 0.03) { // >3% off from 100%
+        for (const item of items) {
+          crossMarketFlags[item.id] = {
+            groupId: gid,
+            groupSize: items.length,
+            groupSum: sum,
+            deviation,
+            signal: `Cross-market inconsistency: ${items.length} outcomes sum to ${(sum*100).toFixed(1)}% instead of ~100%`
+          };
+        }
+      }
+    }
+    
+    allOpportunities = validMarkets.map(m => {
+      const o = analyzeMarket(m);
+      // Attach cross-market flag
+      if (crossMarketFlags[o.id]) {
+        o.crossMarketFlag = crossMarketFlags[o.id];
+      }
+      // Attach live price analysis
+      if (m.relevantLivePrice) {
+        o.relevantLivePrice = m.relevantLivePrice;
+        const priceNote = generateLivePriceNote(o.question, m.relevantLivePrice);
+        if (priceNote) {
+          o.livePriceNote = priceNote;
+          o.reasoning = priceNote.html + o.reasoning;
+        }
+      }
+      return o;
+    })
+      .filter(o => o.edge > 0.001)
       .sort((a,b) => b.edge - a.edge);
 
     document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleString();
     renderDashboard();
-    renderGrid();
+    if (currentView === 'top10') {
+      renderTop10();
+    } else {
+      renderGrid();
+    }
     buildCategoryFilters();
   } catch(err) {
     document.getElementById('grid').innerHTML = `<div class="loading">Error loading markets: ${err.message}</div>`;
@@ -986,8 +1193,9 @@ function renderGrid() {
         </div>
       </div>
       <div class="card-bar"><div class="card-bar-fill" style="width:${barWidth}%;background:${barColor}"></div></div>
+      ${o.livePriceNote ? `<div class="live-price-note" style="margin-bottom:8px">💹 ${o.relevantLivePrice.asset}: $${o.relevantLivePrice.price.toLocaleString(undefined,{maximumFractionDigits:o.relevantLivePrice.price>=100?0:2})}</div>` : ''}
       <div class="card-bottom">
-        <div class="card-resolution">⏱ ${o.eventWindowPassed ? '⏰ Event passed' : o.daysLeft === 0 ? 'Today' : o.daysLeft + 'd left'}${o.news ? ' 📰' : ''}</div>
+        <div class="card-resolution">⏱ ${o.eventWindowPassed ? '⏰ Event passed' : o.daysLeft === 0 ? 'Today' : o.daysLeft + 'd left'}${o.news ? ' 📰' : ''}${o.crossMarketFlag ? ' 🔗' : ''}</div>
         <div>Vol: ${formatMoney(o.volume24h)}/24h</div>
       </div>
     </div>`;
@@ -1054,6 +1262,15 @@ function openModal(id) {
         <div class="edge-row"><span class="el">Spread</span><span>${(o.spread*100).toFixed(1)}%</span></div>
       </div>
     </div>
+
+    ${o.crossMarketFlag ? `
+    <div class="modal-section" style="border:1px solid #a855f744;border-radius:12px;padding:16px;background:#a855f708">
+      <h3>🔗 Cross-Market Consistency</h3>
+      <div class="analysis-text">
+        <p><strong>${o.crossMarketFlag.signal}</strong></p>
+        <p>This market is part of a group of ${o.crossMarketFlag.groupSize} mutually exclusive outcomes. Their YES prices sum to <strong>${(o.crossMarketFlag.groupSum*100).toFixed(1)}%</strong> instead of the expected ~100%. This ${o.crossMarketFlag.deviation > 0.05 ? '<strong>significant</strong>' : 'minor'} deviation of ${(o.crossMarketFlag.deviation*100).toFixed(1)}pp suggests mispricing within this group.</p>
+      </div>
+    </div>` : ''}
 
     <div class="modal-section">
       <h3>🧠 Why We Think This</h3>
@@ -1126,11 +1343,182 @@ document.getElementById('modalOverlay').addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
+// ============================================
+// LIVE PRICE INTEGRATION
+// ============================================
+
+function renderPriceTicker() {
+  const el = document.getElementById('priceTicker');
+  if (!livePrices || Object.keys(livePrices).length <= 1) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'flex';
+  const items = [];
+  const map = { btc: '₿ BTC', eth: 'Ξ ETH', sol: '◎ SOL', xrp: 'XRP', sp500: '📈 S&P 500', gold: '🥇 Gold' };
+  for (const [key, label] of Object.entries(map)) {
+    const d = livePrices[key];
+    if (!d || !d.price) continue;
+    const ch = d.change24h || 0;
+    const chClass = ch >= 0 ? 'up' : 'down';
+    const chSign = ch >= 0 ? '+' : '';
+    const priceStr = d.price >= 1000 ? '$' + d.price.toLocaleString(undefined, {maximumFractionDigits: 0}) : '$' + d.price.toFixed(2);
+    let extra = '';
+    if (key === 'sp500' && d.marketOpen !== undefined) {
+      extra = `<span style="font-size:10px;color:${d.marketOpen ? 'var(--green)' : 'var(--text-muted)'}"> ${d.marketOpen ? '● Open' : '● Closed'}</span>`;
+    }
+    items.push(`<div class="ticker-item"><span class="ticker-asset">${label}</span><span class="ticker-price">${priceStr}</span><span class="ticker-change ${chClass}">${chSign}${ch.toFixed(2)}%</span>${extra}</div>`);
+  }
+  el.innerHTML = items.join('<span style="color:var(--border)">|</span>');
+}
+
+function generateLivePriceNote(question, livePrice) {
+  if (!livePrice || !livePrice.price) return null;
+  const ql = question.toLowerCase();
+  
+  // Extract price target from question
+  const targetMatch = question.match(/\$?([\d,]+(?:\.\d+)?)\s*[kK]?/);
+  if (!targetMatch) return null;
+  
+  let target = parseFloat(targetMatch[1].replace(/,/g, ''));
+  if (/\d+[kK]/.test(question)) target *= 1000;
+  if (target < 1) return null;
+  
+  const current = livePrice.price;
+  const pctMove = ((target - current) / current) * 100;
+  const direction = pctMove > 0 ? 'gain' : 'drop';
+  const asset = livePrice.asset;
+  
+  let extra = '';
+  if (livePrice.marketOpen !== undefined) {
+    extra = ` Market is currently ${livePrice.marketOpen ? 'open' : 'closed'}.`;
+  }
+  
+  return {
+    text: `${asset} is currently at $${current.toLocaleString(undefined, {maximumFractionDigits: current >= 100 ? 0 : 2})} — reaching $${target.toLocaleString()} requires a ${pctMove > 0 ? '+' : ''}${pctMove.toFixed(1)}% ${direction}.${extra}`,
+    html: `<p class="live-price-note">💹 <strong>${asset}</strong> is currently at <strong>$${current.toLocaleString(undefined, {maximumFractionDigits: current >= 100 ? 0 : 2})}</strong> — reaching $${target.toLocaleString()} requires a <strong>${pctMove > 0 ? '+' : ''}${pctMove.toFixed(1)}% ${direction}</strong>.${extra}</p>`,
+    pctMove,
+    current,
+    target
+  };
+}
+
+// ============================================
+// TOP 10 OPPORTUNITIES
+// ============================================
+
+function computeCompositeScore(o) {
+  // ROI (30%)
+  const roiScore = Math.min(1, o.returnPct / 2); // cap at 200% ROI = 1.0
+  
+  // Confidence (25%)
+  const confScore = o.confidence === 'high' ? 1.0 : o.confidence === 'medium' ? 0.6 : 0.2;
+  
+  // News signal strength (20%)
+  let newsScore = 0.3; // default: no news = neutral
+  if (o.newsSignals && o.newsSignals.hasNews) {
+    newsScore = Math.min(1, 0.3 + Math.abs(o.newsSignals.avgSentiment) * 0.7 + (o.newsSignals.agreementLevel >= 3 ? 0.2 : 0));
+  }
+  
+  // Liquidity (15%)
+  const liqScore = o.liqScore === 3 ? 1.0 : o.liqScore === 2 ? 0.6 : 0.2;
+  
+  // Cross-market edge (10%)
+  let crossScore = 0;
+  if (o.crossMarketFlag) {
+    crossScore = Math.min(1, o.crossMarketFlag.deviation * 5); // 20% deviation = 1.0
+  }
+  
+  return roiScore * 0.30 + confScore * 0.25 + newsScore * 0.20 + liqScore * 0.15 + crossScore * 0.10;
+}
+
+function showTop10() {
+  currentView = 'top10';
+  document.getElementById('btnTop10').classList.add('btn-primary');
+  document.getElementById('btnTop10').style.opacity = '1';
+  document.getElementById('btnAllMarkets').classList.remove('active');
+  document.getElementById('grid').style.display = 'none';
+  document.getElementById('top10List').style.display = 'flex';
+  document.querySelector('.controls').style.display = 'none';
+  renderTop10();
+}
+
+function showAllMarkets() {
+  currentView = 'all';
+  document.getElementById('btnAllMarkets').classList.add('active');
+  document.getElementById('grid').style.display = 'grid';
+  document.getElementById('top10List').style.display = 'none';
+  document.querySelector('.controls').style.display = 'flex';
+  document.getElementById('viewLabel').textContent = '';
+  renderGrid();
+}
+
+function renderTop10() {
+  const scored = allOpportunities.map(o => ({...o, compositeScore: computeCompositeScore(o)}));
+  scored.sort((a, b) => b.compositeScore - a.compositeScore);
+  const top10 = scored.slice(0, 10);
+  
+  document.getElementById('viewLabel').textContent = `Showing top 10 of ${allOpportunities.length} opportunities`;
+  
+  if (top10.length === 0) {
+    document.getElementById('top10List').innerHTML = '<div class="loading">No opportunities found yet...</div>';
+    return;
+  }
+  
+  document.getElementById('top10List').innerHTML = top10.map((o, i) => {
+    const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+    const catInfo = CATEGORIES[o.category] || { label: o.category, class: 'tag-politics' };
+    const actionClass = o.direction.includes('YES') ? 'buy-yes' : 'buy-no';
+    
+    // Generate brief reasoning
+    let brief = '';
+    if (o.livePriceNote) brief += o.livePriceNote.text + ' ';
+    if (o.crossMarketFlag) brief += o.crossMarketFlag.signal + '. ';
+    if (o.newsSignals && o.newsSignals.hasNews) {
+      const dir = o.newsSignals.avgSentiment > 0 ? 'bullish' : o.newsSignals.avgSentiment < 0 ? 'bearish' : 'neutral';
+      brief += `News sentiment: ${dir}. `;
+    }
+    if (!brief) {
+      brief = o.confidence === 'high' ? 'High confidence edge with good liquidity.' :
+              o.confidence === 'medium' ? 'Medium confidence — thesis supported by multiple signals.' :
+              'Speculative opportunity with asymmetric payoff.';
+    }
+    
+    return `
+    <div class="ranked-item" onclick="openModal('${o.id}')">
+      <div class="rank-badge ${rankClass}">#${i+1}</div>
+      <div class="ranked-body">
+        <div class="ranked-title">${o.question}</div>
+        <div class="ranked-scores">
+          <span class="tag ${catInfo.class}">${catInfo.label}</span>
+          <span class="score-pill"><strong>${confBadge(o.confidence)}</strong></span>
+          <span class="score-pill">💧 ${liqIndicator(o.liqScore)}</span>
+          <span class="score-pill">Score: <strong>${(o.compositeScore * 100).toFixed(0)}</strong></span>
+          ${o.crossMarketFlag ? '<span class="cross-market-flag">🔗 Cross-market</span>' : ''}
+          ${o.news ? '<span class="score-pill">📰 News</span>' : ''}
+        </div>
+        <div class="ranked-reasoning">${brief}</div>
+        ${o.livePriceNote ? `<div class="live-price-note">💹 ${o.relevantLivePrice.asset}: $${o.relevantLivePrice.price.toLocaleString()}</div>` : ''}
+      </div>
+      <div class="ranked-right">
+        <div class="ranked-roi">+${(o.returnPct*100).toFixed(1)}%</div>
+        <div class="ranked-action ${actionClass}">${o.direction}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${o.daysLeft}d left</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 // Event listeners for filters
 ['searchBox'].forEach(id => document.getElementById(id).addEventListener('input', renderGrid));
 ['sortBy', 'minConfidence'].forEach(id => document.getElementById(id).addEventListener('change', renderGrid));
 
-// Init
+// Init — default to Top 10 view
+currentView = 'top10';
+document.getElementById('grid').style.display = 'none';
+document.getElementById('top10List').style.display = 'flex';
+document.querySelector('.controls').style.display = 'none';
+document.getElementById('btnAllMarkets').classList.remove('active');
 fetchMarkets();
 // Auto-refresh every 60 seconds
 setInterval(fetchMarkets, 60000);

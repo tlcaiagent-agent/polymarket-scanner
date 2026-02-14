@@ -1,12 +1,13 @@
+import { fetchPrices } from './prices.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
   
   try {
-    const pages = await Promise.all([
-      fetchPage(0, 100),
-      fetchPage(100, 100),
-      fetchPage(200, 100)
+    const [pages, livePrices] = await Promise.all([
+      Promise.all([fetchPage(0, 100), fetchPage(100, 100), fetchPage(200, 100)]),
+      fetchPrices().catch(() => ({}))
     ]);
     const all = pages.flat();
     
@@ -18,15 +19,22 @@ export default async function handler(req, res) {
       return true;
     });
 
+    // Attach relevant live price to each market
+    for (const m of markets) {
+      if (!m.question) continue;
+      const ql = m.question.toLowerCase();
+      const relevantPrice = matchLivePrice(ql, livePrices);
+      if (relevantPrice) m.relevantLivePrice = relevantPrice;
+    }
+
     // Fetch news for top 50 markets by volume
     const topMarkets = markets
       .filter(m => m.question && m.active && !m.closed)
       .sort((a, b) => (b.volume24hr || 0) - (a.volume24hr || 0))
       .slice(0, 50);
 
-    // Build unique search queries and group markets
-    const queryMap = new Map(); // searchTerms -> [market indices]
-    const marketIndexMap = new Map(); // market id -> index in markets array
+    const queryMap = new Map();
+    const marketIndexMap = new Map();
     markets.forEach((m, i) => marketIndexMap.set(m.id, i));
 
     for (const m of topMarkets) {
@@ -35,7 +43,6 @@ export default async function handler(req, res) {
       queryMap.get(terms).push(m.id);
     }
 
-    // Fetch news in parallel, max 25 unique queries
     const uniqueQueries = [...queryMap.keys()].slice(0, 25);
     const newsResults = new Map();
 
@@ -68,7 +75,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Attach news to markets
     for (const [terms, ids] of queryMap.entries()) {
       const news = newsResults.get(terms);
       if (news && news.length > 0) {
@@ -81,10 +87,22 @@ export default async function handler(req, res) {
       }
     }
     
-    res.status(200).json({ count: markets.length, markets });
+    res.status(200).json({ count: markets.length, markets, livePrices });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+}
+
+function matchLivePrice(questionLower, prices) {
+  if (!prices) return null;
+  const ql = questionLower;
+  if (/\bbtc\b|bitcoin/.test(ql) && prices.btc) return { asset: 'BTC', ...prices.btc };
+  if (/\beth\b|ethereum/.test(ql) && prices.eth) return { asset: 'ETH', ...prices.eth };
+  if (/\bsol\b|solana/.test(ql) && prices.sol) return { asset: 'SOL', ...prices.sol };
+  if (/\bxrp\b|ripple/.test(ql) && prices.xrp) return { asset: 'XRP', ...prices.xrp };
+  if (/\bs&p|sp500|s&p\s*500/.test(ql) && prices.sp500) return { asset: 'S&P 500', ...prices.sp500 };
+  if (/\bgold\b/.test(ql) && prices.gold) return { asset: 'Gold', ...prices.gold };
+  return null;
 }
 
 async function fetchPage(offset, limit) {

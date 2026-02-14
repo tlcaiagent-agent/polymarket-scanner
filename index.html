@@ -210,6 +210,65 @@ function detectCategory(q, desc) {
   return 'politics'; // default
 }
 
+// Extract event date from question text (returns Date or null)
+function extractEventDate(question, endDate) {
+  const q = question;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  
+  const MONTHS = {january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,september:8,october:9,november:10,december:11,
+    jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  
+  function parseMonth(s) { return MONTHS[s.toLowerCase()]; }
+  function makeDate(month, day, year) {
+    const y = year || (endDate ? endDate.getFullYear() : currentYear);
+    return new Date(y, month, day, 23, 59, 59);
+  }
+
+  // "on February 11, 2026" or "by February 14, 2026"
+  let m1 = q.match(/(?:on|by|before)\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})/i);
+  if (m1) return makeDate(parseMonth(m1[1]), parseInt(m1[2]), parseInt(m1[3]));
+
+  // "on February 11" (no year)
+  let m2 = q.match(/(?:on|by|before)\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s|,|\?|!|\)|$)/i);
+  if (m2) return makeDate(parseMonth(m2[1]), parseInt(m2[2]));
+
+  // "February 9-15" or "February 9 - 15" (date range, use end)
+  let m3 = q.match(/(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})\s*[-–]\s*(\d{1,2})(?:\s*,?\s*(\d{4}))?/i);
+  if (m3) return makeDate(parseMonth(m3[1]), parseInt(m3[3]), m3[4] ? parseInt(m3[4]) : undefined);
+
+  // "in February" or "in February 2026"
+  let m4 = q.match(/in\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)(?:\s+(\d{4}))?/i);
+  if (m4) {
+    const mo = parseMonth(m4[1]);
+    const yr = m4[2] ? parseInt(m4[2]) : (endDate ? endDate.getFullYear() : currentYear);
+    // End of month
+    return new Date(yr, mo + 1, 0, 23, 59, 59);
+  }
+
+  // "on Saturday" / "on Friday" etc — resolve using endDate as hint
+  const DAYS = {sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6};
+  let m5 = q.match(/(?:on|by|this)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/i);
+  if (m5 && endDate) {
+    const targetDay = DAYS[m5[1].toLowerCase()];
+    // Find the closest matching day on or before endDate
+    const d = new Date(endDate);
+    while (d.getDay() !== targetDay && d > new Date(now.getTime() - 14*86400000)) {
+      d.setDate(d.getDate() - 1);
+    }
+    if (d.getDay() === targetDay) return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
+  }
+
+  // "after the March 2026 meeting" (FOMC)
+  let m6 = q.match(/(?:after|following)\s+(?:the\s+)?(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)(?:\s+(\d{4}))?\s+(?:FOMC\s+)?meeting/i);
+  if (m6) {
+    // Use endDate as proxy for FOMC meeting date
+    if (endDate) return endDate;
+  }
+
+  return null;
+}
+
 // Analyze a market and generate model estimate + thesis
 function analyzeMarket(m) {
   const q = m.question;
@@ -219,7 +278,13 @@ function analyzeMarket(m) {
   const dateStr = m.endDate || m.endDateIso || null;
   const endDate = dateStr ? new Date(dateStr) : new Date(Date.now() + 30*86400000);
   const now = new Date();
-  const daysLeft = isNaN(endDate.getTime()) ? 30 : Math.max(0, Math.ceil((endDate - now) / 86400000));
+  
+  // Extract event date from question and use earlier of (event date, endDate)
+  const eventDate = extractEventDate(q, endDate);
+  const effectiveDate = eventDate && eventDate < endDate ? eventDate : endDate;
+  const eventWindowPassed = eventDate && eventDate < now;
+  
+  const daysLeft = isNaN(effectiveDate.getTime()) ? 30 : Math.max(0, Math.ceil((effectiveDate - now) / 86400000));
   const vol24h = m.volume24hr || 0;
   const totalVol = m.volumeNum || 0;
   const liq = m.liquidityNum || 0;
@@ -230,10 +295,33 @@ function analyzeMarket(m) {
 
   // Model estimate based on heuristics
   let modelEstimate, confidence, reasoning;
-  const analysis = generateAnalysis(q, m.description, price, cat, daysLeft, vol24h, liq, m, newsSignals);
-  modelEstimate = analysis.estimate;
-  confidence = analysis.confidence;
-  reasoning = analysis.reasoning;
+
+  // If event window has passed, override analysis
+  if (eventWindowPassed) {
+    if (price > 0.8) {
+      modelEstimate = Math.max(price, price + (1 - price) * 0.1);
+      confidence = 'medium';
+      reasoning = `<p><strong>⏰ Event date has passed.</strong> The specific date in the question (${eventDate.toLocaleDateString()}) is already past. The high price of ${(price*100).toFixed(1)}¢ indicates the event likely occurred. The market should resolve YES soon.</p>
+      <p><strong>Our view:</strong> Agree with market direction. No reason to bet against a likely resolved outcome.</p>`;
+    } else if (price < 0.2) {
+      modelEstimate = Math.min(price, price * 0.9);
+      confidence = 'medium';
+      reasoning = `<p><strong>⏰ Event date has passed.</strong> The specific date in the question (${eventDate.toLocaleDateString()}) is already past. The low price of ${(price*100).toFixed(1)}¢ indicates the event likely did NOT occur. The market should resolve NO soon.</p>
+      <p><strong>Our view:</strong> Agree with market direction. No reason to bet against a likely resolved outcome.</p>`;
+    } else {
+      modelEstimate = price;
+      confidence = 'low';
+      reasoning = `<p><strong>⏰ Event date has passed.</strong> The specific date in the question (${eventDate.toLocaleDateString()}) is already past, but the price is mid-range at ${(price*100).toFixed(1)}¢ — the outcome is unclear. Proceed with caution.</p>`;
+    }
+  } else {
+    const analysis = generateAnalysis(q, m.description, price, cat, daysLeft, vol24h, liq, m, newsSignals);
+    modelEstimate = analysis.estimate;
+    confidence = analysis.confidence;
+    reasoning = analysis.reasoning;
+    if (eventDate && daysLeft <= 1 && daysLeft >= 0) {
+      reasoning = `<p><strong>⏰ Event date is today/tomorrow</strong> (${eventDate.toLocaleDateString()}). Resolution imminent.</p>` + reasoning;
+    }
+  }
 
   const edge = Math.abs(modelEstimate - price);
   const direction = modelEstimate > price ? 'BUY YES' : 'BUY NO';
@@ -265,6 +353,9 @@ function analyzeMarket(m) {
     spread,
     daysLeft,
     endDate: isNaN(endDate.getTime()) ? 'Unknown' : endDate.toISOString(),
+    eventDate: eventDate ? eventDate.toISOString() : null,
+    effectiveDate: effectiveDate.toISOString(),
+    eventWindowPassed: !!eventWindowPassed,
     reasoning,
     image: m.image,
     bestBid: m.bestBid,
@@ -766,7 +857,7 @@ function renderGrid() {
       </div>
       <div class="card-bar"><div class="card-bar-fill" style="width:${barWidth}%;background:${barColor}"></div></div>
       <div class="card-bottom">
-        <div class="card-resolution">⏱ ${o.daysLeft === 0 ? 'Today' : o.daysLeft + 'd left'}${o.news ? ' 📰' : ''}</div>
+        <div class="card-resolution">⏱ ${o.eventWindowPassed ? '⏰ Event passed' : o.daysLeft === 0 ? 'Today' : o.daysLeft + 'd left'}${o.news ? ' 📰' : ''}</div>
         <div>Vol: ${formatMoney(o.volume24h)}/24h</div>
       </div>
     </div>`;

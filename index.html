@@ -1834,155 +1834,196 @@ openModal = function(id) {
 };
 
 // ============================================
-// AUTONOMOUS AUTO-TRADER
+// AUTONOMOUS AUTO-TRADER (merged, single version)
 // ============================================
 
+var TRADE_LOG_KEY = 'pm_trade_log';
+var MIN_HOLD_MS = 120000; // 2 minutes minimum hold time
+
 function logTradeAction(action, trade, reason) {
-  const log = JSON.parse(localStorage.getItem('pm_trade_log') || '[]');
+  var log = JSON.parse(localStorage.getItem(TRADE_LOG_KEY) || '[]');
   log.unshift({
     time: new Date().toISOString(),
-    action,
+    action: action,
     market: trade.question,
     direction: trade.direction,
     price: action === 'OPEN' ? trade.entryPrice : trade.exitPrice,
     shares: trade.shares,
-    reason
+    reason: reason
   });
   if (log.length > 200) log.length = 200;
-  localStorage.setItem('pm_trade_log', JSON.stringify(log));
+  localStorage.setItem(TRADE_LOG_KEY, JSON.stringify(log));
 }
 
 function autoTrader() {
-  const portfolio = getPortfolio();
-  const ops = allOpportunities;
-  if (!ops || ops.length === 0) return;
+  if (!allOpportunities || allOpportunities.length === 0) return;
 
-  // === EXIT LOGIC ===
-  for (const trade of portfolio.trades.filter(t => t.status === 'open')) {
-    const market = ops.find(o => o.id === trade.marketId);
-    if (!market) continue;
+  var p = getPortfolio();
+  var openTrades = p.trades.filter(function(t) { return t.status === 'open'; });
+  var openMarketIds = new Set(openTrades.map(function(t) { return t.marketId; }));
+  var acted = false;
 
-    const currentPrice = trade.direction === 'BUY YES' ? market.marketPrice : (1 - market.marketPrice);
-    const pnlPct = (currentPrice - trade.entryPrice) / trade.entryPrice;
-    const hoursHeld = (Date.now() - new Date(trade.entryTime).getTime()) / 3600000;
+  // === EXIT RULES ===
+  for (var i = 0; i < openTrades.length; i++) {
+    var t = openTrades[i];
 
-    let shouldClose = false;
-    let closeReason = '';
+    // Minimum hold time: skip if held < 2 minutes
+    var holdMs = Date.now() - new Date(t.entryTime).getTime();
+    if (holdMs < MIN_HOLD_MS) continue;
 
-    if (pnlPct > 0.20) {
-      shouldClose = true;
-      closeReason = `Take profit: +${(pnlPct*100).toFixed(1)}% gain captured`;
-    } else if (trade.direction === 'BUY YES' && market.marketPrice >= market.modelEstimate) {
-      shouldClose = true;
-      closeReason = `Edge captured: market ${(market.marketPrice*100).toFixed(1)}¢ reached model ${(market.modelEstimate*100).toFixed(1)}¢`;
-    } else if (trade.direction === 'BUY NO' && market.marketPrice <= (1 - market.modelEstimate)) {
-      shouldClose = true;
-      closeReason = `Edge captured: market moved to model estimate`;
-    } else if (pnlPct < -0.30) {
-      shouldClose = true;
-      closeReason = `Stop loss: ${(pnlPct*100).toFixed(1)}% — cutting losses`;
-    } else if (hoursHeld > 48 && market.returnPct < 0.05) {
-      shouldClose = true;
-      closeReason = `Stale position: held ${Math.round(hoursHeld)}h, edge shrunk to ${(market.returnPct*100).toFixed(1)}%`;
-    } else if (market.eventWindowPassed || market.daysLeft === 0) {
-      shouldClose = true;
-      closeReason = `Market resolving/resolved — exiting`;
+    var opp = allOpportunities.find(function(o) { return o.id === t.marketId; });
+    // Direction-adjusted price for P&L
+    var currentPrice = t.currentPrice;
+    if (opp) {
+      currentPrice = t.direction === 'BUY YES' ? opp.marketPrice : (1 - opp.marketPrice);
+    }
+    var entryPrice = t.entryPrice;
+    var positionPnlPct = (currentPrice - entryPrice) / entryPrice;
+    var hoursHeld = holdMs / 3600000;
+    var reason = null;
+
+    // (a) Take profit: +20%
+    if (positionPnlPct > 0.20) {
+      reason = 'Take profit: +' + (positionPnlPct*100).toFixed(1) + '% gain captured';
     }
 
-    if (shouldClose) {
-      trade.exitPrice = currentPrice;
-      trade.exitTime = new Date().toISOString();
-      trade.pnl = (currentPrice - trade.entryPrice) * trade.shares;
-      trade.status = 'closed';
-      trade.closeReason = closeReason;
-      portfolio.cashBalance += currentPrice * trade.shares;
-      logTradeAction('CLOSE', trade, closeReason);
+    // (b) Edge captured: price moved >=50% of the way from entry to model estimate AND positive P&L
+    if (!reason && opp && positionPnlPct > 0) {
+      var targetPrice = t.direction === 'BUY YES' ? opp.modelEstimate : (1 - opp.modelEstimate);
+      var totalEdge = targetPrice - entryPrice;
+      var priceMoved = currentPrice - entryPrice;
+      // Only trigger if total edge was meaningful and we've captured >=50% of it
+      if (totalEdge > 0.01 && priceMoved >= totalEdge * 0.5) {
+        reason = 'Edge captured — price moved ' + (priceMoved*100).toFixed(1) + '\u00a2 of ' + (totalEdge*100).toFixed(1) + '\u00a2 edge (' + ((priceMoved/totalEdge)*100).toFixed(0) + '%). P&L: +' + (positionPnlPct*100).toFixed(1) + '%';
+      }
+    }
+
+    // (c) Market resolved — use RAW market price, not direction-adjusted
+    if (!reason && opp) {
+      var rawPrice = opp.marketPrice;
+      if (t.direction === 'BUY YES' && rawPrice > 0.95) {
+        reason = 'Market resolved YES (price ' + (rawPrice*100).toFixed(1) + '\u00a2) — taking profit';
+      } else if (t.direction === 'BUY NO' && rawPrice < 0.05) {
+        reason = 'Market resolved NO (YES price ' + (rawPrice*100).toFixed(1) + '\u00a2) — taking profit';
+      }
+    }
+
+    // (d) Stop-loss: down > 30%
+    if (!reason && positionPnlPct < -0.30) {
+      reason = 'Stop-loss triggered — position down ' + (positionPnlPct*100).toFixed(1) + '% (threshold: -30%)';
+    }
+
+    // (e) Stale trade: 24h+ and edge shrunk below 5%
+    if (!reason && hoursHeld >= 24 && opp) {
+      var currentEdge = Math.abs(opp.modelEstimate - opp.marketPrice);
+      var currentROI = opp.entryPrice > 0 ? currentEdge / opp.entryPrice : 0;
+      if (currentROI < 0.05) {
+        reason = 'Held ' + Math.round(hoursHeld) + 'h and edge shrunk to ' + (currentROI*100).toFixed(1) + '% ROI. Closing stale position.';
+      }
+    }
+
+    // (f) Market resolving/resolved
+    if (!reason && opp && (opp.eventWindowPassed || opp.daysLeft === 0)) {
+      reason = 'Market resolving/resolved — exiting';
+    }
+
+    if (reason) {
+      var pnlVal = (currentPrice - entryPrice) * t.shares;
+      t.exitPrice = currentPrice;
+      t.exitTime = new Date().toISOString();
+      t.pnl = pnlVal;
+      t.status = 'closed';
+      t.closeReason = reason;
+      p.cashBalance += t.shares * currentPrice;
+      acted = true;
+      logTradeAction('CLOSE', t, reason);
     }
   }
 
-  // === ENTRY LOGIC ===
-  const openMarketIds = new Set(portfolio.trades.filter(t => t.status === 'open').map(t => t.marketId));
-  let openCount = portfolio.trades.filter(t => t.status === 'open').length;
-  const maxOpenPositions = 10;
-  const positionSize = 100;
+  // === ENTRY RULES ===
+  var candidates = allOpportunities.filter(function(o) {
+    return o.returnPct > 0.25 &&
+           (o.confidence === 'medium' || o.confidence === 'high' || (o.confidence === 'low' && o.returnPct > 0.50)) &&
+           o.liquidity > 30000 &&
+           !openMarketIds.has(o.id) &&
+           !o.eventWindowPassed &&
+           o.daysLeft > 0;
+  }).sort(function(a,b) { return b.returnPct - a.returnPct; });
 
-  const candidates = ops
-    .filter(o => !openMarketIds.has(o.id))
-    .filter(o => o.returnPct > 0.25)
-    .filter(o => o.confidence !== 'low' || o.returnPct > 0.5)
-    .filter(o => o.liquidity > 30000)
-    .filter(o => !o.eventWindowPassed)
-    .filter(o => o.daysLeft > 0)
-    .sort((a, b) => b.returnPct - a.returnPct);
+  for (var j = 0; j < candidates.length; j++) {
+    var c = candidates[j];
+    if (p.cashBalance < 100) break;
+    var currentOpen = p.trades.filter(function(t){return t.status==='open';}).length;
+    if (currentOpen >= 10) break;
 
-  for (const opp of candidates) {
-    if (openCount >= maxOpenPositions) break;
-    if (portfolio.cashBalance < positionSize) break;
+    var ePrice = c.direction === 'BUY YES' ? c.marketPrice : (1 - c.marketPrice);
+    if (ePrice <= 0 || ePrice >= 1) continue;
 
-    const entryPrice = opp.direction === 'BUY YES' ? opp.marketPrice : (1 - opp.marketPrice);
-    if (entryPrice <= 0 || entryPrice >= 1) continue;
-
-    const shares = Math.floor(positionSize / entryPrice);
+    var shares = Math.floor(100 / ePrice);
     if (shares <= 0) continue;
 
-    const trade = {
-      id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2),
-      marketId: opp.id,
-      question: opp.question,
-      direction: opp.direction,
-      entryPrice: entryPrice,
+    var trade = {
+      id: (typeof generateTradeId === 'function') ? generateTradeId() : (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)),
+      marketId: c.id,
+      question: c.question,
+      direction: c.direction,
+      entryPrice: ePrice,
       entryTime: new Date().toISOString(),
       shares: shares,
-      currentPrice: entryPrice,
+      currentPrice: ePrice,
       status: 'open',
       exitPrice: null,
       exitTime: null,
       pnl: null,
-      reasoning: `Auto-trade: ${(opp.returnPct*100).toFixed(0)}% ROI, ${opp.confidence} confidence, $${formatNum(opp.liquidity)} liquidity. Model: ${(opp.modelEstimate*100).toFixed(1)}¢ vs market ${(opp.marketPrice*100).toFixed(1)}¢.`,
-      modelEstimate: opp.modelEstimate
+      reasoning: 'Auto-trade: ' + (c.returnPct*100).toFixed(0) + '% ROI, ' + c.confidence + ' confidence, $' + formatNum(c.liquidity) + ' liquidity. Model: ' + (c.modelEstimate*100).toFixed(1) + '\u00a2 vs market ' + (c.marketPrice*100).toFixed(1) + '\u00a2.',
+      modelEstimate: c.modelEstimate
     };
 
-    portfolio.trades.push(trade);
-    portfolio.cashBalance -= entryPrice * shares;
-    openCount++;
-    logTradeAction('OPEN', trade, `ROI: ${(opp.returnPct*100).toFixed(0)}%, Confidence: ${opp.confidence}`);
+    p.trades.push(trade);
+    p.cashBalance -= ePrice * shares;
+    acted = true;
+    openMarketIds.add(c.id);
+    logTradeAction('OPEN', trade, 'ROI: ' + (c.returnPct*100).toFixed(0) + '%, Confidence: ' + c.confidence);
   }
 
-  portfolio.portfolioValue = calcPortfolioValue(portfolio);
-  savePortfolio(portfolio);
-  saveSnapshot(portfolio.portfolioValue);
+  if (acted) {
+    p.portfolioValue = calcPortfolioValue(p);
+    savePortfolio(p);
+    saveSnapshot(p.portfolioValue);
+    if (document.getElementById('tab-portfolio').classList.contains('active')) renderPortfolio();
+  }
+
   updateAutoStats();
-  if (document.getElementById('tab-portfolio').classList.contains('active')) renderPortfolio();
 }
 
 function updateAutoStats() {
-  const p = getPortfolio();
-  const openCount = p.trades.filter(t => t.status === 'open').length;
-  const val = calcPortfolioValue(p);
-  const pnl = val - 10000;
-  const sign = pnl >= 0 ? '+' : '';
-  const color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-  const el = document.getElementById('autoStats');
-  if (el) el.innerHTML = `${openCount} open positions | <span style="color:${color}">${sign}$${pnl.toFixed(2)} P&L</span>`;
-  // Also update header badge
-  const hdr = document.getElementById('autoTradingBadge');
-  if (hdr) hdr.innerHTML = `🤖 <span style="color:var(--green)">Auto</span> | ${openCount} pos | <span style="color:${color}">${sign}$${pnl.toFixed(0)}</span>`;
+  var p = getPortfolio();
+  var openCount = p.trades.filter(function(t){return t.status==='open';}).length;
+  var closedCount = p.trades.filter(function(t){return t.status==='closed';}).length;
+  var val = calcPortfolioValue(p);
+  var pnl = val - 10000;
+  var sign = pnl >= 0 ? '+' : '';
+  var color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  var el = document.getElementById('autoStats');
+  if (el) el.innerHTML = openCount + ' open | ' + closedCount + ' closed | P&L: <span style="color:' + color + '">' + sign + '$' + pnl.toFixed(2) + '</span>';
+  var hdr = document.getElementById('autoTradingBadge');
+  if (hdr) hdr.innerHTML = '\u{1f916} <span style="color:var(--green)">Auto</span> | ' + openCount + ' pos | <span style="color:' + color + '">' + sign + '$' + pnl.toFixed(0) + '</span>';
 }
 
 function renderTradeLog() {
-  const log = JSON.parse(localStorage.getItem('pm_trade_log') || '[]');
-  const el = document.getElementById('tradeLogSection');
+  var log = JSON.parse(localStorage.getItem(TRADE_LOG_KEY) || '[]');
+  var el = document.getElementById('tradeLogSection');
   if (!el) return;
   if (log.length === 0) {
     el.innerHTML = '<div class="empty-state">No autonomous trades yet. The auto-trader runs every 60s.</div>';
     return;
   }
-  const rows = log.slice(0, 50).map(function(entry) {
-    const time = new Date(entry.time).toLocaleString();
-    const actionColor = entry.action === 'OPEN' ? 'var(--green)' : 'var(--red)';
-    const actionIcon = entry.action === 'OPEN' ? '🟢' : '🔴';
-    const mkt = entry.market.length > 60 ? entry.market.slice(0,57) + '...' : entry.market;
-    const price = entry.price ? (entry.price * 100).toFixed(1) + '¢' : '—';
+  var rows = log.slice(0, 50).map(function(entry) {
+    var time = new Date(entry.time).toLocaleString();
+    var actionColor = entry.action === 'OPEN' ? 'var(--green)' : 'var(--red)';
+    var actionIcon = entry.action === 'OPEN' ? '\u{1f7e2}' : '\u{1f534}';
+    var mkt = entry.market.length > 60 ? entry.market.slice(0,57) + '...' : entry.market;
+    var price = entry.price ? (entry.price * 100).toFixed(1) + '\u00a2' : '\u2014';
     return '<tr>' +
       '<td style="font-size:11px;white-space:nowrap;color:var(--text-dim)">' + time + '</td>' +
       '<td><span style="color:' + actionColor + ';font-weight:700">' + actionIcon + ' ' + entry.action + '</span></td>' +
@@ -1995,172 +2036,6 @@ function renderTradeLog() {
   el.innerHTML = '<table class="portfolio-table"><thead><tr><th>Time</th><th>Action</th><th>Market</th><th>Dir</th><th>Price</th><th>Reason</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
-// Hook: update portfolio prices on each fetch + run autoTrader
-var _origFetchMarkets = fetchMarkets;
-fetchMarkets = async function() {
-  await _origFetchMarkets();
-  updateOpenPrices();
-  autoTrader();
-  updatePortfolioSummaryBar();
-};
-
-// ============================================
-// AUTONOMOUS TRADER
-// ============================================
-
-var TRADE_LOG_KEY = 'polymarket_trade_log';
-
-function getTradeLog() {
-  var raw = localStorage.getItem(TRADE_LOG_KEY);
-  return raw ? JSON.parse(raw) : [];
-}
-
-function addTradeLog(entry) {
-  var log = getTradeLog();
-  log.push({ time: new Date().toISOString(), message: entry });
-  if (log.length > 200) log.splice(0, log.length - 200);
-  localStorage.setItem(TRADE_LOG_KEY, JSON.stringify(log));
-}
-
-function autoTrader() {
-  if (!allOpportunities || allOpportunities.length === 0) return;
-
-  var p = getPortfolio();
-  var openTrades = p.trades.filter(function(t) { return t.status === 'open'; });
-  var openMarketIds = new Set(openTrades.map(function(t) { return t.marketId; }));
-  var acted = false;
-
-  // === EXIT RULES: check open positions ===
-  for (var i = 0; i < openTrades.length; i++) {
-    var t = openTrades[i];
-    var opp = allOpportunities.find(function(o) { return o.id === t.marketId; });
-    var currentPrice = t.currentPrice;
-    var entryPrice = t.entryPrice;
-    var positionPnlPct = (currentPrice - entryPrice) / entryPrice;
-    var hoursHeld = (Date.now() - new Date(t.entryTime).getTime()) / 3600000;
-    var reason = null;
-
-    // (a) Edge captured: current price moved past model estimate
-    if (opp) {
-      var targetPrice = t.direction === 'BUY YES' ? opp.modelEstimate : (1 - opp.modelEstimate);
-      if (currentPrice >= targetPrice && positionPnlPct > 0) {
-        reason = 'Edge captured \u2014 price reached model estimate (' + (currentPrice*100).toFixed(1) + '\u00a2 >= ' + (targetPrice*100).toFixed(1) + '\u00a2). P&L: ' + (positionPnlPct>=0?'+':'') + (positionPnlPct*100).toFixed(1) + '%';
-      }
-    }
-
-    // (b) Market resolved (price near 0 or 1)
-    if (!reason && (currentPrice > 0.95 || currentPrice < 0.05)) {
-      reason = 'Market appears resolved (price at ' + (currentPrice*100).toFixed(1) + '\u00a2). Taking profit/loss.';
-    }
-
-    // (c) Stale trade: 24h+ and edge shrunk below 5%
-    if (!reason && hoursHeld >= 24 && opp) {
-      var currentEdge = Math.abs(opp.modelEstimate - opp.marketPrice);
-      var currentROI = opp.entryPrice > 0 ? currentEdge / opp.entryPrice : 0;
-      if (currentROI < 0.05) {
-        reason = 'Held 24h+ and edge shrunk to ' + (currentROI*100).toFixed(1) + '% ROI (below 5% threshold). Closing stale position.';
-      }
-    }
-
-    // (d) Stop-loss: down > 30%
-    if (!reason && positionPnlPct < -0.30) {
-      reason = 'Stop-loss triggered \u2014 position down ' + (positionPnlPct*100).toFixed(1) + '% (threshold: -30%)';
-    }
-
-    if (reason) {
-      var pnlBefore = (currentPrice - entryPrice) * t.shares;
-      t.exitPrice = currentPrice;
-      t.exitTime = new Date().toISOString();
-      t.pnl = pnlBefore;
-      t.status = 'closed';
-      p.cashBalance += t.shares * currentPrice;
-      acted = true;
-      addTradeLog('\u{1f534} CLOSED ' + t.direction + ' on "' + t.question.slice(0,60) + '" at ' + (currentPrice*100).toFixed(1) + '\u00a2 \u2014 ' + reason + ' | P&L: ' + (pnlBefore>=0?'+':'') + '$' + pnlBefore.toFixed(2));
-    }
-  }
-
-  // === ENTRY RULES: scan top opportunities ===
-  var candidates = allOpportunities.filter(function(o) {
-    return o.returnPct > 0.30 &&
-           (o.confidence === 'medium' || o.confidence === 'high') &&
-           o.liquidity > 50000 &&
-           !openMarketIds.has(o.id) &&
-           !o.eventWindowPassed;
-  }).sort(function(a,b) { return b.returnPct - a.returnPct; }).slice(0, 10);
-
-  for (var j = 0; j < candidates.length; j++) {
-    var c = candidates[j];
-    if (p.cashBalance < 100) break; // need at least $100
-    // Don't open more than 10 simultaneous positions
-    var currentOpen = p.trades.filter(function(t){return t.status==='open';}).length;
-    if (currentOpen >= 10) break;
-
-    var shares = 100 / c.entryPrice;
-    p.trades.push({
-      id: generateTradeId(),
-      marketId: c.id,
-      question: c.question,
-      direction: c.direction,
-      entryPrice: c.entryPrice,
-      entryTime: new Date().toISOString(),
-      shares: shares,
-      currentPrice: c.entryPrice,
-      status: 'open',
-      exitPrice: null,
-      exitTime: null,
-      pnl: null,
-      reasoning: 'Auto-entry: ' + (c.returnPct*100).toFixed(1) + '% ROI, ' + c.confidence + ' confidence, $' + formatNum(c.liquidity) + ' liquidity. ' + (c.deepAnalysis ? c.deepAnalysis.whyEdge.slice(0,150) : '')
-    });
-    p.cashBalance -= 100;
-    acted = true;
-    openMarketIds.add(c.id);
-    addTradeLog('\u{1f7e2} OPENED ' + c.direction + ' on "' + c.question.slice(0,60) + '" at ' + (c.entryPrice*100).toFixed(1) + '\u00a2 ($100) \u2014 ' + (c.returnPct*100).toFixed(1) + '% ROI, ' + c.confidence + ' confidence');
-  }
-
-  if (acted) {
-    p.portfolioValue = calcPortfolioValue(p);
-    savePortfolio(p);
-    saveSnapshot(p.portfolioValue);
-    if (document.getElementById('tab-portfolio').classList.contains('active')) renderPortfolio();
-  }
-
-  // Update auto stats
-  updateAutoStats();
-}
-
-function updateAutoStats() {
-  var p = getPortfolio();
-  var openCount = p.trades.filter(function(t){return t.status==='open';}).length;
-  var closedCount = p.trades.filter(function(t){return t.status==='closed';}).length;
-  var val = calcPortfolioValue(p);
-  var pnl = val - 10000;
-  var el = document.getElementById('autoStats');
-  if (el) el.innerHTML = '\u{1f4ca} ' + openCount + ' open | ' + closedCount + ' closed | P&L: <span style="color:' + (pnl>=0?'var(--green)':'var(--red)') + '">' + (pnl>=0?'+':'') + '$' + pnl.toFixed(2) + '</span>';
-}
-
-function renderTradeLog() {
-  var log = getTradeLog();
-  var el = document.getElementById('tradeLogSection');
-  if (!el) return;
-  if (log.length === 0) {
-    el.innerHTML = '<div class="empty-state">No autonomous decisions yet. The bot will start trading on the next data refresh.</div>';
-    return;
-  }
-  var html = '<div style="max-height:300px;overflow-y:auto;background:var(--bg);border-radius:10px;padding:12px;border:1px solid var(--border)">';
-  for (var i = log.length - 1; i >= 0; i--) {
-    var entry = log[i];
-    var d = new Date(entry.time);
-    var ts = d.toLocaleString();
-    var isOpen = entry.message.indexOf('\u{1f7e2}') === 0;
-    var color = isOpen ? 'var(--green)' : 'var(--red)';
-    html += '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;line-height:1.5">';
-    html += '<span style="color:var(--text-muted);margin-right:8px">' + ts + '</span>';
-    html += '<span style="color:' + color + '">' + entry.message + '</span></div>';
-  }
-  html += '</div>';
-  el.innerHTML = html;
-}
-
 // Patch renderPortfolio to also render trade log and auto stats
 var _origRenderPortfolio = renderPortfolio;
 renderPortfolio = function() {
@@ -2169,15 +2044,14 @@ renderPortfolio = function() {
   updateAutoStats();
 };
 
-// Patch fetchMarkets to run autoTrader after each refresh
-var _origFetchMarkets2 = fetchMarkets;
+// Single fetchMarkets patch — runs autoTrader after each refresh
+var _origFetchMarkets = fetchMarkets;
 fetchMarkets = async function() {
-  await _origFetchMarkets2();
+  await _origFetchMarkets();
+  updateOpenPrices();
   autoTrader();
+  updatePortfolioSummaryBar();
 };
-
-// Remove the "+ New Trade" button label, replace with manual override
-// (already handled in HTML)
 
 // Init portfolio summary
 updatePortfolioSummaryBar();

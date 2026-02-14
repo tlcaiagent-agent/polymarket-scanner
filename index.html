@@ -1522,6 +1522,344 @@ document.getElementById('btnAllMarkets').classList.remove('active');
 fetchMarkets();
 // Auto-refresh every 60 seconds
 setInterval(fetchMarkets, 60000);
+
+
+// ============================================
+// MOCK TRADING SYSTEM
+// ============================================
+
+const PORTFOLIO_KEY = 'polymarket_mock_portfolio';
+const SNAPSHOTS_KEY = 'polymarket_portfolio_snapshots';
+
+function getPortfolio() {
+  const raw = localStorage.getItem(PORTFOLIO_KEY);
+  if (raw) return JSON.parse(raw);
+  return { trades: [], portfolioValue: 10000, cashBalance: 10000 };
+}
+
+function savePortfolio(p) {
+  localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(p));
+  updatePortfolioSummaryBar();
+}
+
+function getSnapshots() {
+  const raw = localStorage.getItem(SNAPSHOTS_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+function saveSnapshot(value) {
+  const snaps = getSnapshots();
+  snaps.push({ time: new Date().toISOString(), value });
+  if (snaps.length > 500) snaps.splice(0, snaps.length - 500);
+  localStorage.setItem(SNAPSHOTS_KEY, JSON.stringify(snaps));
+}
+
+function generateTradeId() {
+  return 'xxxx-xxxx'.replace(/x/g, () => Math.floor(Math.random()*16).toString(16));
+}
+
+function calcPortfolioValue(p) {
+  let openValue = 0;
+  for (const t of p.trades) {
+    if (t.status === 'open') openValue += t.shares * (t.currentPrice || t.entryPrice);
+  }
+  return p.cashBalance + openValue;
+}
+
+function updateOpenPrices() {
+  const p = getPortfolio();
+  let changed = false;
+  for (const t of p.trades) {
+    if (t.status !== 'open') continue;
+    const opp = allOpportunities.find(o => o.id === t.marketId);
+    if (opp) {
+      const newPrice = t.direction === 'BUY YES' ? opp.marketPrice : (1 - opp.marketPrice);
+      if (newPrice !== t.currentPrice) { t.currentPrice = newPrice; changed = true; }
+    }
+  }
+  if (changed) {
+    p.portfolioValue = calcPortfolioValue(p);
+    savePortfolio(p);
+    saveSnapshot(p.portfolioValue);
+  }
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.toggle('active', el.id === 'tab-' + tab));
+  if (tab === 'portfolio') renderPortfolio();
+}
+
+function updatePortfolioSummaryBar() {
+  const p = getPortfolio();
+  const val = calcPortfolioValue(p);
+  const pnl = val - 10000;
+  const pnlPct = (pnl / 10000 * 100).toFixed(1);
+  const color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const sign = pnl >= 0 ? '+' : '';
+  const el = document.getElementById('portfolioSummaryBar');
+  if (el) el.innerHTML = '\u{1f4c8} Portfolio: <span style="color:' + color + '">$' + val.toFixed(0) + ' (' + sign + pnlPct + '%)</span>';
+}
+
+function openTradeForm(pf) {
+  pf = pf || {};
+  document.getElementById('tradeForm').innerHTML = '<button class="modal-close" onclick="closeTradeForm()">&times;</button>' +
+    '<h3>\u{1f4dd} Open Mock Trade</h3>' +
+    '<label>Market Question</label>' +
+    '<input type="text" id="tf_question" value="' + (pf.question||'').replace(/"/g,'&quot;') + '" placeholder="e.g. Will BTC hit $84K?">' +
+    '<input type="hidden" id="tf_marketId" value="' + (pf.marketId||'') + '">' +
+    '<label>Direction</label>' +
+    '<select id="tf_direction"><option value="BUY YES"' + (pf.direction==='BUY YES'?' selected':'') + '>BUY YES</option><option value="BUY NO"' + (pf.direction==='BUY NO'?' selected':'') + '>BUY NO</option></select>' +
+    '<label>Position Size ($)</label>' +
+    '<input type="number" id="tf_size" value="' + (pf.size||100) + '" min="1" step="1">' +
+    '<label>Entry Price (\u00a2 per share)</label>' +
+    '<input type="number" id="tf_price" value="' + ((pf.entryPrice||0.5)*100).toFixed(1) + '" min="0.1" max="99.9" step="0.1">' +
+    '<label>Reasoning</label>' +
+    '<textarea id="tf_reasoning">' + (pf.reasoning||'') + '</textarea>' +
+    '<div class="trade-form-actions"><button class="btn-cancel" onclick="closeTradeForm()">Cancel</button><button class="btn-confirm" onclick="confirmTrade()">Open Position</button></div>';
+  document.getElementById('tradeFormOverlay').classList.add('open');
+}
+
+function closeTradeForm() {
+  document.getElementById('tradeFormOverlay').classList.remove('open');
+}
+
+document.getElementById('tradeFormOverlay').addEventListener('click', function(e) {
+  if (e.target === e.currentTarget) closeTradeForm();
+});
+
+function confirmTrade() {
+  const question = document.getElementById('tf_question').value.trim();
+  if (!question) return alert('Enter a market question');
+  const marketId = document.getElementById('tf_marketId').value || question;
+  const direction = document.getElementById('tf_direction').value;
+  const size = parseFloat(document.getElementById('tf_size').value);
+  const entryPrice = parseFloat(document.getElementById('tf_price').value) / 100;
+  const reasoning = document.getElementById('tf_reasoning').value;
+  if (isNaN(size) || size <= 0) return alert('Invalid position size');
+  if (isNaN(entryPrice) || entryPrice <= 0 || entryPrice >= 1) return alert('Invalid entry price');
+  const p = getPortfolio();
+  if (size > p.cashBalance) return alert('Insufficient cash. Available: $' + p.cashBalance.toFixed(2));
+  const shares = size / entryPrice;
+  p.trades.push({
+    id: generateTradeId(), marketId, question, direction, entryPrice,
+    entryTime: new Date().toISOString(), shares, currentPrice: entryPrice,
+    status: 'open', exitPrice: null, exitTime: null, pnl: null, reasoning
+  });
+  p.cashBalance -= size;
+  p.portfolioValue = calcPortfolioValue(p);
+  savePortfolio(p);
+  saveSnapshot(p.portfolioValue);
+  closeTradeForm();
+  if (document.getElementById('tab-portfolio').classList.contains('active')) renderPortfolio();
+}
+
+function closePosition(tradeId) {
+  const p = getPortfolio();
+  const t = p.trades.find(x => x.id === tradeId);
+  if (!t || t.status !== 'open') return;
+  t.exitPrice = t.currentPrice;
+  t.exitTime = new Date().toISOString();
+  t.pnl = (t.exitPrice - t.entryPrice) * t.shares;
+  t.status = 'closed';
+  p.cashBalance += t.shares * t.exitPrice;
+  p.portfolioValue = calcPortfolioValue(p);
+  savePortfolio(p);
+  saveSnapshot(p.portfolioValue);
+  renderPortfolio();
+}
+
+function formatTimeHeld(isoStart, isoEnd) {
+  const ms = (isoEnd ? new Date(isoEnd) : new Date()) - new Date(isoStart);
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return mins + 'm';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ' + (mins % 60) + 'm';
+  return Math.floor(hrs / 24) + 'd ' + (hrs % 24) + 'h';
+}
+
+function renderPortfolio() {
+  const p = getPortfolio();
+  const val = calcPortfolioValue(p);
+  const totalPnl = val - 10000;
+  const totalPnlPct = (totalPnl / 10000 * 100).toFixed(1);
+  const openTrades = p.trades.filter(t => t.status === 'open');
+  const closedTrades = p.trades.filter(t => t.status === 'closed');
+  const wins = closedTrades.filter(t => t.pnl > 0).length;
+  const winRate = closedTrades.length > 0 ? ((wins / closedTrades.length) * 100).toFixed(0) : '\u2014';
+
+  document.getElementById('portfolioDashboard').innerHTML =
+    '<div class="dash-card"><div class="label">Starting Balance</div><div class="value">$10,000</div></div>' +
+    '<div class="dash-card highlight"><div class="label">Current Value</div><div class="value" style="color:' + (val>=10000?'var(--green)':'var(--red)') + '">$' + val.toFixed(2) + '</div></div>' +
+    '<div class="dash-card"><div class="label">Total P&L</div><div class="value ' + (totalPnl>=0?'pnl-pos':'pnl-neg') + '">' + (totalPnl>=0?'+':'') + '$' + totalPnl.toFixed(2) + ' (' + (totalPnl>=0?'+':'') + totalPnlPct + '%)</div></div>' +
+    '<div class="dash-card"><div class="label">Win Rate</div><div class="value">' + winRate + (winRate!=='\u2014'?'%':'') + '</div><div class="sub">' + wins + '/' + closedTrades.length + ' trades</div></div>' +
+    '<div class="dash-card"><div class="label">Cash Balance</div><div class="value">$' + p.cashBalance.toFixed(2) + '</div></div>' +
+    '<div class="dash-card"><div class="label">Open / Closed</div><div class="value">' + openTrades.length + ' / ' + closedTrades.length + '</div></div>';
+
+  // Open positions
+  if (openTrades.length === 0) {
+    document.getElementById('openPositionsTable').innerHTML = '<div class="empty-state">No open positions. Use the Scanner to find opportunities!</div>';
+  } else {
+    var rows = openTrades.map(function(t) {
+      var uPnl = (t.currentPrice - t.entryPrice) * t.shares;
+      var uPnlPct = ((t.currentPrice - t.entryPrice) / t.entryPrice * 100).toFixed(1);
+      var cls = uPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+      var scannerLink = allOpportunities.find(function(o){return o.id === t.marketId;})
+        ? ' <a href="#" onclick="event.preventDefault();switchTab(\'scanner\');openModal(\'' + t.marketId + '\')" style="font-size:11px">\u{1f50d}</a>' : '';
+      return '<tr><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + t.question.replace(/"/g,'&quot;') + '">' + t.question + scannerLink + '</td>' +
+        '<td>' + t.direction.replace('BUY ','') + '</td>' +
+        '<td>' + (t.entryPrice*100).toFixed(1) + '\u00a2 \u2192 ' + (t.currentPrice*100).toFixed(1) + '\u00a2</td>' +
+        '<td class="' + cls + '">' + (uPnl>=0?'+':'') + '$' + uPnl.toFixed(2) + ' (' + (uPnl>=0?'+':'') + uPnlPct + '%)</td>' +
+        '<td>' + formatTimeHeld(t.entryTime) + '</td>' +
+        '<td><button class="close-pos-btn" onclick="closePosition(\'' + t.id + '\')">Close</button></td></tr>';
+    }).join('');
+    document.getElementById('openPositionsTable').innerHTML = '<table class="portfolio-table"><thead><tr><th>Market</th><th>Dir</th><th>Entry \u2192 Current</th><th>Unrealized P&L</th><th>Held</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  // Closed trades
+  if (closedTrades.length === 0) {
+    document.getElementById('closedTradesTable').innerHTML = '<div class="empty-state">No closed trades yet.</div>';
+  } else {
+    var crows = closedTrades.slice().reverse().map(function(t) {
+      var cls = t.pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+      var pnlPct = ((t.exitPrice - t.entryPrice) / t.entryPrice * 100).toFixed(1);
+      return '<tr><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + t.question.replace(/"/g,'&quot;') + '">' + t.question + '</td>' +
+        '<td>' + t.direction.replace('BUY ','') + '</td>' +
+        '<td>' + (t.entryPrice*100).toFixed(1) + '\u00a2 \u2192 ' + (t.exitPrice*100).toFixed(1) + '\u00a2</td>' +
+        '<td class="' + cls + '">' + (t.pnl>=0?'+':'') + '$' + t.pnl.toFixed(2) + ' (' + (t.pnl>=0?'+':'') + pnlPct + '%)</td>' +
+        '<td>' + formatTimeHeld(t.entryTime, t.exitTime) + '</td>' +
+        '<td><span class="reasoning-toggle" onclick="this.nextElementSibling.classList.toggle(\'open\')">\u{1f4ac} Why</span><div class="reasoning-expand">' + (t.reasoning||'No reasoning recorded.') + '</div></td></tr>';
+    }).join('');
+    document.getElementById('closedTradesTable').innerHTML = '<table class="portfolio-table"><thead><tr><th>Market</th><th>Dir</th><th>Entry \u2192 Exit</th><th>P&L</th><th>Held</th><th>Reasoning</th></tr></thead><tbody>' + crows + '</tbody></table>';
+  }
+
+  renderPnlChart();
+}
+
+function renderPnlChart() {
+  var canvas = document.getElementById('pnlChart');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var wrap = canvas.parentElement;
+  canvas.width = wrap.clientWidth - 40;
+  canvas.height = wrap.clientHeight - 40;
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  var snaps = getSnapshots();
+  if (snaps.length < 2) {
+    ctx.fillStyle = '#555a70';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Chart will appear after portfolio activity', W/2, H/2);
+    return;
+  }
+
+  var values = snaps.map(function(s){return s.value;});
+  var minV = Math.min.apply(null, values) * 0.995;
+  var maxV = Math.max.apply(null, values) * 1.005;
+  var range = maxV - minV || 1;
+  var pad = 10;
+
+  ctx.strokeStyle = '#1e2130'; ctx.lineWidth = 1;
+  for (var i = 0; i <= 4; i++) {
+    var y = pad + (H - 2*pad) * i / 4;
+    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W-pad, y); ctx.stroke();
+    ctx.fillStyle = '#555a70'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('$' + (maxV - (range * i / 4)).toFixed(0), pad, y - 3);
+  }
+
+  ctx.beginPath();
+  for (var i = 0; i < values.length; i++) {
+    var x = pad + (W - 2*pad) * i / (values.length - 1);
+    var y = pad + (H - 2*pad) * (1 - (values[i] - minV) / range);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  var lastVal = values[values.length - 1];
+  ctx.strokeStyle = lastVal >= 10000 ? '#00d68f' : '#ff4d6a';
+  ctx.lineWidth = 2; ctx.stroke();
+
+  ctx.lineTo(pad + (W - 2*pad), H - pad);
+  ctx.lineTo(pad, H - pad);
+  ctx.closePath();
+  ctx.fillStyle = lastVal >= 10000 ? 'rgba(0,214,143,0.08)' : 'rgba(255,77,106,0.08)';
+  ctx.fill();
+
+  var baseY = pad + (H - 2*pad) * (1 - (10000 - minV) / range);
+  if (baseY > pad && baseY < H - pad) {
+    ctx.setLineDash([4,4]); ctx.strokeStyle = '#555a70'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad, baseY); ctx.lineTo(W-pad, baseY); ctx.stroke();
+    ctx.setLineDash([]); ctx.fillStyle = '#555a70'; ctx.font = '10px sans-serif';
+    ctx.fillText('$10,000', W - pad - 45, baseY - 4);
+  }
+}
+
+// Hook: add Mock Trade buttons to scanner cards after render
+var _origRenderGrid = renderGrid;
+renderGrid = function() {
+  _origRenderGrid();
+  document.querySelectorAll('.card').forEach(function(card) {
+    var onclick = card.getAttribute('onclick');
+    if (!onclick) return;
+    var m = onclick.match(/openModal\('([^']+)'\)/);
+    if (!m) return;
+    var id = m[1];
+    var bottom = card.querySelector('.card-bottom');
+    if (bottom && !bottom.querySelector('.mock-trade-btn')) {
+      var btn = document.createElement('button');
+      btn.className = 'mock-trade-btn';
+      btn.textContent = '\u{1f4dd} Trade';
+      btn.onclick = function(e) {
+        e.stopPropagation();
+        var o = allOpportunities.find(function(x){return x.id === id;});
+        if (!o) return;
+        openTradeForm({
+          marketId: o.id, question: o.question, direction: o.direction,
+          entryPrice: o.entryPrice, size: 100,
+          reasoning: o.deepAnalysis ? o.deepAnalysis.whyEdge.slice(0,200) : 'Model edge: ' + (o.returnPct*100).toFixed(1) + '% ROI, ' + o.confidence + ' confidence'
+        });
+      };
+      bottom.appendChild(btn);
+    }
+  });
+};
+
+// Hook: add Mock Trade button to modal
+var _origOpenModal = openModal;
+openModal = function(id) {
+  _origOpenModal(id);
+  var o = allOpportunities.find(function(x){return x.id === id;});
+  if (!o) return;
+  var modalEl = document.getElementById('modal');
+  var link = modalEl.querySelector('.modal-link');
+  if (link && !modalEl.querySelector('.modal-mock-trade')) {
+    var btn = document.createElement('button');
+    btn.className = 'btn modal-mock-trade';
+    btn.style.cssText = 'margin-left:12px;padding:10px 18px;background:var(--green);border-color:var(--green);color:#000;font-weight:600;font-size:14px;border-radius:8px;cursor:pointer';
+    btn.textContent = '\u{1f4dd} Mock Trade';
+    btn.onclick = function() {
+      closeModal();
+      openTradeForm({
+        marketId: o.id, question: o.question, direction: o.direction,
+        entryPrice: o.entryPrice, size: 100,
+        reasoning: o.deepAnalysis ? o.deepAnalysis.whyEdge.slice(0,200) : 'Model edge: ' + (o.returnPct*100).toFixed(1) + '% ROI, ' + o.confidence + ' confidence'
+      });
+    };
+    link.parentNode.insertBefore(btn, link.nextSibling);
+  }
+};
+
+// Hook: update portfolio prices on each fetch
+var _origFetchMarkets = fetchMarkets;
+fetchMarkets = async function() {
+  await _origFetchMarkets();
+  updateOpenPrices();
+  updatePortfolioSummaryBar();
+};
+
+// Init portfolio summary
+updatePortfolioSummaryBar();
+
 </script>
 </body>
 </html>

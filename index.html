@@ -151,6 +151,7 @@ select:hover,.btn:hover{border-color:var(--accent)}
 <div class="header-meta">
 <span class="status-badge"><span class="live-dot"></span> Live Data</span>
 <span id="lastUpdated">Loading...</span>
+<button class="btn" onclick="fetchMarkets()" style="padding:6px 12px;font-size:12px;cursor:pointer" title="Refresh now">🔄 Refresh</button>
 </div>
 </div>
 
@@ -231,6 +232,8 @@ function analyzeMarket(m) {
 
   const edge = Math.abs(modelEstimate - price);
   const direction = modelEstimate > price ? 'BUY YES' : 'BUY NO';
+  const entryPrice = direction === 'BUY YES' ? price : (1 - price);
+  const returnPct = entryPrice > 0 ? (edge / entryPrice) : 0; // ROI: edge relative to what you pay
   
   // Liquidity score 1-3
   let liqScore = 1;
@@ -246,6 +249,8 @@ function analyzeMarket(m) {
     marketPrice: price,
     modelEstimate,
     edge,
+    returnPct,
+    entryPrice,
     direction,
     confidence,
     liqScore,
@@ -458,6 +463,7 @@ const EMBEDDED_MARKETS = [
 function renderDashboard() {
   const ops = allOpportunities;
   const avgEdge = ops.length ? ops.reduce((s,o) => s+o.edge, 0) / ops.length : 0;
+  const avgReturn = ops.length ? ops.reduce((s,o) => s+o.returnPct, 0) / ops.length : 0;
   const best = ops[0];
   const catCounts = {};
   ops.forEach(o => { catCounts[o.category] = (catCounts[o.category]||0) + 1; });
@@ -473,13 +479,13 @@ function renderDashboard() {
       <div class="sub">Across ${Object.keys(catCounts).length} categories</div>
     </div>
     <div class="dash-card">
-      <div class="label">Average Edge</div>
-      <div class="value green">+${(avgEdge*100).toFixed(1)}%</div>
-      <div class="sub">Model vs Market</div>
+      <div class="label">Average Return</div>
+      <div class="value green">+${(avgReturn*100).toFixed(1)}%</div>
+      <div class="sub">ROI on entry price</div>
     </div>
     <div class="dash-card highlight">
       <div class="label">Best Opportunity</div>
-      <div class="value green" style="font-size:18px">${best ? '+' + (best.edge*100).toFixed(1) + '%' : 'N/A'}</div>
+      <div class="value green" style="font-size:18px">${best ? '+' + (best.returnPct*100).toFixed(1) + '% ROI' : 'N/A'}</div>
       <div class="sub">${best ? best.question.slice(0,50) + '...' : ''}</div>
     </div>
     <div class="dash-card">
@@ -523,7 +529,7 @@ function getFilteredSorted() {
   // Sort
   const sort = document.getElementById('sortBy').value;
   ops.sort((a,b) => {
-    if (sort === 'edge') return b.edge - a.edge;
+    if (sort === 'edge') return b.returnPct - a.returnPct;
     if (sort === 'confidence') return confVal(b.confidence) - confVal(a.confidence) || b.edge - a.edge;
     if (sort === 'liquidity') return b.liquidity - a.liquidity;
     if (sort === 'resolution') return a.daysLeft - b.daysLeft;
@@ -552,14 +558,14 @@ function renderGrid() {
   document.getElementById('grid').innerHTML = ops.map(o => {
     const edgeClass = o.edge > 0 ? 'pos' : 'neg';
     const catInfo = CATEGORIES[o.category] || { label: o.category, class: 'tag-politics' };
-    const barWidth = Math.min(100, o.edge * 100 * 5); // Scale for visibility
+    const barWidth = Math.min(100, o.returnPct * 100 * 2); // Scale for visibility
     const barColor = o.direction.includes('YES') ? 'var(--green)' : 'var(--accent)';
     
     return `
     <div class="card" onclick="openModal('${o.id}')">
       <div class="card-top">
         <div class="card-title">${o.question}</div>
-        <div class="card-edge ${edgeClass}">+${(o.edge*100).toFixed(1)}%</div>
+        <div class="card-edge ${edgeClass}">+${(o.returnPct*100).toFixed(1)}% ROI</div>
       </div>
       <div class="card-meta">
         <span class="tag ${catInfo.class}">${catInfo.label}</span>
@@ -618,6 +624,10 @@ function openModal(id) {
           <div class="lbl">Edge</div>
           <div class="val blue">+${(o.edge*100).toFixed(1)}%</div>
         </div>
+        <div class="modal-price-box">
+          <div class="lbl">Return (ROI)</div>
+          <div class="val green">+${(o.returnPct*100).toFixed(1)}%</div>
+        </div>
       </div>
       <div class="compare-bar">
         <div class="fill" style="width:${(o.modelEstimate*100)}%"></div>
@@ -638,6 +648,8 @@ function openModal(id) {
         <div class="edge-row"><span class="el">Market Yes Price</span><span>${(o.marketPrice*100).toFixed(2)}¢</span></div>
         <div class="edge-row"><span class="el">Model Fair Value</span><span>${(o.modelEstimate*100).toFixed(2)}¢</span></div>
         <div class="edge-row"><span class="el">Raw Edge</span><span style="color:var(--green)">+${(o.edge*100).toFixed(2)}%</span></div>
+        <div class="edge-row"><span class="el">Return (ROI)</span><span style="color:var(--green);font-weight:700">+${(o.returnPct*100).toFixed(1)}%</span></div>
+        <div class="edge-row"><span class="el">Entry Price</span><span>${(o.entryPrice*100).toFixed(2)}¢</span></div>
         <div class="edge-row"><span class="el">Recommended Action</span><span style="color:var(--accent);font-weight:700">${o.direction}</span></div>
         <div class="edge-row"><span class="el">Bid / Ask</span><span>${o.bestBid || '—'} / ${o.bestAsk || '—'}</span></div>
         <div class="edge-row"><span class="el">Spread</span><span>${(o.spread*100).toFixed(1)}%</span></div>
@@ -687,8 +699,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 
 // Init
 fetchMarkets();
-// Auto-refresh every 5 minutes
-setInterval(fetchMarkets, 300000);
+// Auto-refresh every 60 seconds
+setInterval(fetchMarkets, 60000);
 </script>
 </body>
 </html>

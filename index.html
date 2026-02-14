@@ -245,6 +245,7 @@ select:hover,.btn:hover{border-color:var(--accent)}
 <h1><span>📊</span> Polymarket Scanner</h1>
 <div class="header-meta">
 <div class="portfolio-summary-bar" id="portfolioSummaryBar" onclick="switchTab('portfolio')" title="View portfolio">📈 Portfolio: $10,000 (+0.0%)</div>
+<span id="autoTradingBadge" class="status-badge" style="background:var(--green-dim);color:var(--green);cursor:pointer;animation:pulse 2s infinite" onclick="switchTab('portfolio')">🤖 Auto | 0 pos | $0</span>
 <span class="status-badge"><span class="live-dot"></span> Live Data</span>
 <span id="lastUpdated">Loading...</span>
 <button class="btn" onclick="fetchMarkets()" style="padding:6px 12px;font-size:12px;cursor:pointer" title="Refresh now">🔄 Refresh</button>
@@ -1739,6 +1740,8 @@ function renderPortfolio() {
   }
 
   renderPnlChart();
+  renderTradeLog();
+  updateAutoStats();
 }
 
 function renderPnlChart() {
@@ -1830,11 +1833,174 @@ openModal = function(id) {
   }
 };
 
-// Hook: update portfolio prices on each fetch
+// ============================================
+// AUTONOMOUS AUTO-TRADER
+// ============================================
+
+function logTradeAction(action, trade, reason) {
+  const log = JSON.parse(localStorage.getItem('pm_trade_log') || '[]');
+  log.unshift({
+    time: new Date().toISOString(),
+    action,
+    market: trade.question,
+    direction: trade.direction,
+    price: action === 'OPEN' ? trade.entryPrice : trade.exitPrice,
+    shares: trade.shares,
+    reason
+  });
+  if (log.length > 200) log.length = 200;
+  localStorage.setItem('pm_trade_log', JSON.stringify(log));
+}
+
+function autoTrader() {
+  const portfolio = getPortfolio();
+  const ops = allOpportunities;
+  if (!ops || ops.length === 0) return;
+
+  // === EXIT LOGIC ===
+  for (const trade of portfolio.trades.filter(t => t.status === 'open')) {
+    const market = ops.find(o => o.id === trade.marketId);
+    if (!market) continue;
+
+    const currentPrice = trade.direction === 'BUY YES' ? market.marketPrice : (1 - market.marketPrice);
+    const pnlPct = (currentPrice - trade.entryPrice) / trade.entryPrice;
+    const hoursHeld = (Date.now() - new Date(trade.entryTime).getTime()) / 3600000;
+
+    let shouldClose = false;
+    let closeReason = '';
+
+    if (pnlPct > 0.20) {
+      shouldClose = true;
+      closeReason = `Take profit: +${(pnlPct*100).toFixed(1)}% gain captured`;
+    } else if (trade.direction === 'BUY YES' && market.marketPrice >= market.modelEstimate) {
+      shouldClose = true;
+      closeReason = `Edge captured: market ${(market.marketPrice*100).toFixed(1)}¢ reached model ${(market.modelEstimate*100).toFixed(1)}¢`;
+    } else if (trade.direction === 'BUY NO' && market.marketPrice <= (1 - market.modelEstimate)) {
+      shouldClose = true;
+      closeReason = `Edge captured: market moved to model estimate`;
+    } else if (pnlPct < -0.30) {
+      shouldClose = true;
+      closeReason = `Stop loss: ${(pnlPct*100).toFixed(1)}% — cutting losses`;
+    } else if (hoursHeld > 48 && market.returnPct < 0.05) {
+      shouldClose = true;
+      closeReason = `Stale position: held ${Math.round(hoursHeld)}h, edge shrunk to ${(market.returnPct*100).toFixed(1)}%`;
+    } else if (market.eventWindowPassed || market.daysLeft === 0) {
+      shouldClose = true;
+      closeReason = `Market resolving/resolved — exiting`;
+    }
+
+    if (shouldClose) {
+      trade.exitPrice = currentPrice;
+      trade.exitTime = new Date().toISOString();
+      trade.pnl = (currentPrice - trade.entryPrice) * trade.shares;
+      trade.status = 'closed';
+      trade.closeReason = closeReason;
+      portfolio.cashBalance += currentPrice * trade.shares;
+      logTradeAction('CLOSE', trade, closeReason);
+    }
+  }
+
+  // === ENTRY LOGIC ===
+  const openMarketIds = new Set(portfolio.trades.filter(t => t.status === 'open').map(t => t.marketId));
+  let openCount = portfolio.trades.filter(t => t.status === 'open').length;
+  const maxOpenPositions = 10;
+  const positionSize = 100;
+
+  const candidates = ops
+    .filter(o => !openMarketIds.has(o.id))
+    .filter(o => o.returnPct > 0.25)
+    .filter(o => o.confidence !== 'low' || o.returnPct > 0.5)
+    .filter(o => o.liquidity > 30000)
+    .filter(o => !o.eventWindowPassed)
+    .filter(o => o.daysLeft > 0)
+    .sort((a, b) => b.returnPct - a.returnPct);
+
+  for (const opp of candidates) {
+    if (openCount >= maxOpenPositions) break;
+    if (portfolio.cashBalance < positionSize) break;
+
+    const entryPrice = opp.direction === 'BUY YES' ? opp.marketPrice : (1 - opp.marketPrice);
+    if (entryPrice <= 0 || entryPrice >= 1) continue;
+
+    const shares = Math.floor(positionSize / entryPrice);
+    if (shares <= 0) continue;
+
+    const trade = {
+      id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2),
+      marketId: opp.id,
+      question: opp.question,
+      direction: opp.direction,
+      entryPrice: entryPrice,
+      entryTime: new Date().toISOString(),
+      shares: shares,
+      currentPrice: entryPrice,
+      status: 'open',
+      exitPrice: null,
+      exitTime: null,
+      pnl: null,
+      reasoning: `Auto-trade: ${(opp.returnPct*100).toFixed(0)}% ROI, ${opp.confidence} confidence, $${formatNum(opp.liquidity)} liquidity. Model: ${(opp.modelEstimate*100).toFixed(1)}¢ vs market ${(opp.marketPrice*100).toFixed(1)}¢.`,
+      modelEstimate: opp.modelEstimate
+    };
+
+    portfolio.trades.push(trade);
+    portfolio.cashBalance -= entryPrice * shares;
+    openCount++;
+    logTradeAction('OPEN', trade, `ROI: ${(opp.returnPct*100).toFixed(0)}%, Confidence: ${opp.confidence}`);
+  }
+
+  portfolio.portfolioValue = calcPortfolioValue(portfolio);
+  savePortfolio(portfolio);
+  saveSnapshot(portfolio.portfolioValue);
+  updateAutoStats();
+  if (document.getElementById('tab-portfolio').classList.contains('active')) renderPortfolio();
+}
+
+function updateAutoStats() {
+  const p = getPortfolio();
+  const openCount = p.trades.filter(t => t.status === 'open').length;
+  const val = calcPortfolioValue(p);
+  const pnl = val - 10000;
+  const sign = pnl >= 0 ? '+' : '';
+  const color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const el = document.getElementById('autoStats');
+  if (el) el.innerHTML = `${openCount} open positions | <span style="color:${color}">${sign}$${pnl.toFixed(2)} P&L</span>`;
+  // Also update header badge
+  const hdr = document.getElementById('autoTradingBadge');
+  if (hdr) hdr.innerHTML = `🤖 <span style="color:var(--green)">Auto</span> | ${openCount} pos | <span style="color:${color}">${sign}$${pnl.toFixed(0)}</span>`;
+}
+
+function renderTradeLog() {
+  const log = JSON.parse(localStorage.getItem('pm_trade_log') || '[]');
+  const el = document.getElementById('tradeLogSection');
+  if (!el) return;
+  if (log.length === 0) {
+    el.innerHTML = '<div class="empty-state">No autonomous trades yet. The auto-trader runs every 60s.</div>';
+    return;
+  }
+  const rows = log.slice(0, 50).map(function(entry) {
+    const time = new Date(entry.time).toLocaleString();
+    const actionColor = entry.action === 'OPEN' ? 'var(--green)' : 'var(--red)';
+    const actionIcon = entry.action === 'OPEN' ? '🟢' : '🔴';
+    const mkt = entry.market.length > 60 ? entry.market.slice(0,57) + '...' : entry.market;
+    const price = entry.price ? (entry.price * 100).toFixed(1) + '¢' : '—';
+    return '<tr>' +
+      '<td style="font-size:11px;white-space:nowrap;color:var(--text-dim)">' + time + '</td>' +
+      '<td><span style="color:' + actionColor + ';font-weight:700">' + actionIcon + ' ' + entry.action + '</span></td>' +
+      '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (entry.market||'').replace(/"/g,'&quot;') + '">' + mkt + '</td>' +
+      '<td>' + (entry.direction||'').replace('BUY ','') + '</td>' +
+      '<td>' + price + '</td>' +
+      '<td style="font-size:12px;color:var(--text-dim);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (entry.reason||'').replace(/"/g,'&quot;') + '">' + (entry.reason||'') + '</td>' +
+      '</tr>';
+  }).join('');
+  el.innerHTML = '<table class="portfolio-table"><thead><tr><th>Time</th><th>Action</th><th>Market</th><th>Dir</th><th>Price</th><th>Reason</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+// Hook: update portfolio prices on each fetch + run autoTrader
 var _origFetchMarkets = fetchMarkets;
 fetchMarkets = async function() {
   await _origFetchMarkets();
   updateOpenPrices();
+  autoTrader();
   updatePortfolioSummaryBar();
 };
 

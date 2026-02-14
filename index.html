@@ -289,6 +289,7 @@ select:hover,.btn:hover{border-color:var(--accent)}
 </div><!-- end tab-scanner -->
 
 <div class="tab-content" id="tab-portfolio">
+<div id="autoModeBar" style="padding:16px 32px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px"><div style="display:flex;align-items:center;gap:10px"><span style="font-size:20px">🤖</span><span style="font-weight:700;font-size:16px">Autonomous Mode: <span style="color:var(--green)">ON</span></span><span style="font-size:12px;padding:3px 8px;border-radius:6px;background:var(--green-dim);color:var(--green)">Auto-trading every 60s</span></div><div style="display:flex;gap:16px;font-size:13px;color:var(--text-dim)"><span id="autoStats">Scanning...</span></div><div><button class="manual-trade-btn" onclick="openTradeForm()" style="font-size:12px;padding:6px 14px">✍️ Manual Override</button></div></div>
 <div class="portfolio-dashboard" id="portfolioDashboard"></div>
 <div class="pnl-chart-container">
 <h3>📊 Portfolio Value Over Time</h3>
@@ -304,6 +305,10 @@ select:hover,.btn:hover{border-color:var(--accent)}
 <div class="portfolio-section">
 <h3>📜 Closed Trades</h3>
 <div id="closedTradesTable"></div>
+</div>
+<div class="portfolio-section">
+<h3>📋 Trade Log</h3>
+<div id="tradeLogSection"></div>
 </div>
 </div>
 
@@ -1794,34 +1799,10 @@ function renderPnlChart() {
   }
 }
 
-// Hook: add Mock Trade buttons to scanner cards after render
+// Hook: scanner card render (autonomous mode - no manual trade buttons on cards)
 var _origRenderGrid = renderGrid;
 renderGrid = function() {
   _origRenderGrid();
-  document.querySelectorAll('.card').forEach(function(card) {
-    var onclick = card.getAttribute('onclick');
-    if (!onclick) return;
-    var m = onclick.match(/openModal\('([^']+)'\)/);
-    if (!m) return;
-    var id = m[1];
-    var bottom = card.querySelector('.card-bottom');
-    if (bottom && !bottom.querySelector('.mock-trade-btn')) {
-      var btn = document.createElement('button');
-      btn.className = 'mock-trade-btn';
-      btn.textContent = '\u{1f4dd} Trade';
-      btn.onclick = function(e) {
-        e.stopPropagation();
-        var o = allOpportunities.find(function(x){return x.id === id;});
-        if (!o) return;
-        openTradeForm({
-          marketId: o.id, question: o.question, direction: o.direction,
-          entryPrice: o.entryPrice, size: 100,
-          reasoning: o.deepAnalysis ? o.deepAnalysis.whyEdge.slice(0,200) : 'Model edge: ' + (o.returnPct*100).toFixed(1) + '% ROI, ' + o.confidence + ' confidence'
-        });
-      };
-      bottom.appendChild(btn);
-    }
-  });
 };
 
 // Hook: add Mock Trade button to modal
@@ -1856,6 +1837,181 @@ fetchMarkets = async function() {
   updateOpenPrices();
   updatePortfolioSummaryBar();
 };
+
+// ============================================
+// AUTONOMOUS TRADER
+// ============================================
+
+var TRADE_LOG_KEY = 'polymarket_trade_log';
+
+function getTradeLog() {
+  var raw = localStorage.getItem(TRADE_LOG_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+function addTradeLog(entry) {
+  var log = getTradeLog();
+  log.push({ time: new Date().toISOString(), message: entry });
+  if (log.length > 200) log.splice(0, log.length - 200);
+  localStorage.setItem(TRADE_LOG_KEY, JSON.stringify(log));
+}
+
+function autoTrader() {
+  if (!allOpportunities || allOpportunities.length === 0) return;
+
+  var p = getPortfolio();
+  var openTrades = p.trades.filter(function(t) { return t.status === 'open'; });
+  var openMarketIds = new Set(openTrades.map(function(t) { return t.marketId; }));
+  var acted = false;
+
+  // === EXIT RULES: check open positions ===
+  for (var i = 0; i < openTrades.length; i++) {
+    var t = openTrades[i];
+    var opp = allOpportunities.find(function(o) { return o.id === t.marketId; });
+    var currentPrice = t.currentPrice;
+    var entryPrice = t.entryPrice;
+    var positionPnlPct = (currentPrice - entryPrice) / entryPrice;
+    var hoursHeld = (Date.now() - new Date(t.entryTime).getTime()) / 3600000;
+    var reason = null;
+
+    // (a) Edge captured: current price moved past model estimate
+    if (opp) {
+      var targetPrice = t.direction === 'BUY YES' ? opp.modelEstimate : (1 - opp.modelEstimate);
+      if (currentPrice >= targetPrice && positionPnlPct > 0) {
+        reason = 'Edge captured \u2014 price reached model estimate (' + (currentPrice*100).toFixed(1) + '\u00a2 >= ' + (targetPrice*100).toFixed(1) + '\u00a2). P&L: ' + (positionPnlPct>=0?'+':'') + (positionPnlPct*100).toFixed(1) + '%';
+      }
+    }
+
+    // (b) Market resolved (price near 0 or 1)
+    if (!reason && (currentPrice > 0.95 || currentPrice < 0.05)) {
+      reason = 'Market appears resolved (price at ' + (currentPrice*100).toFixed(1) + '\u00a2). Taking profit/loss.';
+    }
+
+    // (c) Stale trade: 24h+ and edge shrunk below 5%
+    if (!reason && hoursHeld >= 24 && opp) {
+      var currentEdge = Math.abs(opp.modelEstimate - opp.marketPrice);
+      var currentROI = opp.entryPrice > 0 ? currentEdge / opp.entryPrice : 0;
+      if (currentROI < 0.05) {
+        reason = 'Held 24h+ and edge shrunk to ' + (currentROI*100).toFixed(1) + '% ROI (below 5% threshold). Closing stale position.';
+      }
+    }
+
+    // (d) Stop-loss: down > 30%
+    if (!reason && positionPnlPct < -0.30) {
+      reason = 'Stop-loss triggered \u2014 position down ' + (positionPnlPct*100).toFixed(1) + '% (threshold: -30%)';
+    }
+
+    if (reason) {
+      var pnlBefore = (currentPrice - entryPrice) * t.shares;
+      t.exitPrice = currentPrice;
+      t.exitTime = new Date().toISOString();
+      t.pnl = pnlBefore;
+      t.status = 'closed';
+      p.cashBalance += t.shares * currentPrice;
+      acted = true;
+      addTradeLog('\u{1f534} CLOSED ' + t.direction + ' on "' + t.question.slice(0,60) + '" at ' + (currentPrice*100).toFixed(1) + '\u00a2 \u2014 ' + reason + ' | P&L: ' + (pnlBefore>=0?'+':'') + '$' + pnlBefore.toFixed(2));
+    }
+  }
+
+  // === ENTRY RULES: scan top opportunities ===
+  var candidates = allOpportunities.filter(function(o) {
+    return o.returnPct > 0.30 &&
+           (o.confidence === 'medium' || o.confidence === 'high') &&
+           o.liquidity > 50000 &&
+           !openMarketIds.has(o.id) &&
+           !o.eventWindowPassed;
+  }).sort(function(a,b) { return b.returnPct - a.returnPct; }).slice(0, 10);
+
+  for (var j = 0; j < candidates.length; j++) {
+    var c = candidates[j];
+    if (p.cashBalance < 100) break; // need at least $100
+    // Don't open more than 10 simultaneous positions
+    var currentOpen = p.trades.filter(function(t){return t.status==='open';}).length;
+    if (currentOpen >= 10) break;
+
+    var shares = 100 / c.entryPrice;
+    p.trades.push({
+      id: generateTradeId(),
+      marketId: c.id,
+      question: c.question,
+      direction: c.direction,
+      entryPrice: c.entryPrice,
+      entryTime: new Date().toISOString(),
+      shares: shares,
+      currentPrice: c.entryPrice,
+      status: 'open',
+      exitPrice: null,
+      exitTime: null,
+      pnl: null,
+      reasoning: 'Auto-entry: ' + (c.returnPct*100).toFixed(1) + '% ROI, ' + c.confidence + ' confidence, $' + formatNum(c.liquidity) + ' liquidity. ' + (c.deepAnalysis ? c.deepAnalysis.whyEdge.slice(0,150) : '')
+    });
+    p.cashBalance -= 100;
+    acted = true;
+    openMarketIds.add(c.id);
+    addTradeLog('\u{1f7e2} OPENED ' + c.direction + ' on "' + c.question.slice(0,60) + '" at ' + (c.entryPrice*100).toFixed(1) + '\u00a2 ($100) \u2014 ' + (c.returnPct*100).toFixed(1) + '% ROI, ' + c.confidence + ' confidence');
+  }
+
+  if (acted) {
+    p.portfolioValue = calcPortfolioValue(p);
+    savePortfolio(p);
+    saveSnapshot(p.portfolioValue);
+    if (document.getElementById('tab-portfolio').classList.contains('active')) renderPortfolio();
+  }
+
+  // Update auto stats
+  updateAutoStats();
+}
+
+function updateAutoStats() {
+  var p = getPortfolio();
+  var openCount = p.trades.filter(function(t){return t.status==='open';}).length;
+  var closedCount = p.trades.filter(function(t){return t.status==='closed';}).length;
+  var val = calcPortfolioValue(p);
+  var pnl = val - 10000;
+  var el = document.getElementById('autoStats');
+  if (el) el.innerHTML = '\u{1f4ca} ' + openCount + ' open | ' + closedCount + ' closed | P&L: <span style="color:' + (pnl>=0?'var(--green)':'var(--red)') + '">' + (pnl>=0?'+':'') + '$' + pnl.toFixed(2) + '</span>';
+}
+
+function renderTradeLog() {
+  var log = getTradeLog();
+  var el = document.getElementById('tradeLogSection');
+  if (!el) return;
+  if (log.length === 0) {
+    el.innerHTML = '<div class="empty-state">No autonomous decisions yet. The bot will start trading on the next data refresh.</div>';
+    return;
+  }
+  var html = '<div style="max-height:300px;overflow-y:auto;background:var(--bg);border-radius:10px;padding:12px;border:1px solid var(--border)">';
+  for (var i = log.length - 1; i >= 0; i--) {
+    var entry = log[i];
+    var d = new Date(entry.time);
+    var ts = d.toLocaleString();
+    var isOpen = entry.message.indexOf('\u{1f7e2}') === 0;
+    var color = isOpen ? 'var(--green)' : 'var(--red)';
+    html += '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;line-height:1.5">';
+    html += '<span style="color:var(--text-muted);margin-right:8px">' + ts + '</span>';
+    html += '<span style="color:' + color + '">' + entry.message + '</span></div>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+// Patch renderPortfolio to also render trade log and auto stats
+var _origRenderPortfolio = renderPortfolio;
+renderPortfolio = function() {
+  _origRenderPortfolio();
+  renderTradeLog();
+  updateAutoStats();
+};
+
+// Patch fetchMarkets to run autoTrader after each refresh
+var _origFetchMarkets2 = fetchMarkets;
+fetchMarkets = async function() {
+  await _origFetchMarkets2();
+  autoTrader();
+};
+
+// Remove the "+ New Trade" button label, replace with manual override
+// (already handled in HTML)
 
 // Init portfolio summary
 updatePortfolioSummaryBar();

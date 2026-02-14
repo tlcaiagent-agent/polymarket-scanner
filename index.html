@@ -343,23 +343,52 @@ function analyzeBias(price, daysLeft, vol24h, liq, raw) {
   let factors = '';
   let confidence = 'medium';
 
-  // Recency bias: sharp recent moves often overshoot
   const dayChange = raw.oneDayPriceChange || 0;
   const weekChange = raw.oneWeekPriceChange || 0;
-  
+
+  // === RESOLVED / ESSENTIALLY RESOLVED MARKETS ===
+  // If market is at resolution date (0 days left) or price is extreme (>95% or <5%),
+  // the market is likely settled. Trust the market, don't second-guess it.
+  if (daysLeft === 0 && (price > 0.9 || price < 0.1)) {
+    // Market is at resolution and strongly directional — it's decided
+    adjustment = 0;
+    thesis = `This market is at or past its resolution date with the price at ${(price*100).toFixed(0)}¢. The outcome is essentially determined. No model edge exists — the market is reflecting the known result.`;
+    factors = `Market is resolved or resolving. Price reflects the actual outcome.`;
+    confidence = 'low';
+    return { adjustment, thesis, factors, confidence };
+  }
+
+  // If price is very extreme (>95% or <5%) regardless of time, the market is near-certain.
+  // Don't apply adjustments that would pull it AWAY from certainty.
+  if (price > 0.95 || price < 0.05) {
+    // Near-certain markets: tiny adjustment toward certainty only
+    if (price > 0.95) {
+      adjustment = Math.min(0.01, (1 - price) * 0.3); // Nudge toward 100%, never away
+      thesis = `This market is pricing at ${(price*100).toFixed(1)}% — near certainty. Extreme favorites in prediction markets tend to be very slightly underpriced due to capital opportunity cost. Minimal edge exists.`;
+    } else {
+      adjustment = Math.max(-0.01, -(price) * 0.3); // Nudge toward 0%, never away
+      thesis = `This market is pricing at ${(price*100).toFixed(1)}% — near zero probability. Extreme longshots tend to be slightly overpriced due to lottery-ticket bias. Minimal edge on NO.`;
+    }
+    factors = `Near-certain market. The market consensus is strong and likely correct. Only micro-edges from structural biases.`;
+    confidence = 'low';
+    return { adjustment, thesis, factors, confidence };
+  }
+
+  // === ACTIVE MARKETS WITH REAL UNCERTAINTY ===
+
+  // Recency bias: sharp recent moves often overshoot
   if (Math.abs(dayChange) > 0.1) {
-    // Big 1-day move — likely overreaction
-    adjustment = -dayChange * 0.15; // Fade 15% of the move
+    adjustment = -dayChange * 0.15;
     thesis = `The market moved ${(dayChange*100).toFixed(1)}¢ in the last 24 hours, which suggests potential overreaction. Large single-day moves in prediction markets tend to overshoot by 10-20% before mean-reverting. We're fading a portion of this move.`;
     factors = `Momentum and mean-reversion dynamics. High 24h volume ($${formatNum(vol24h)}) confirms active repricing, but late movers often push prices past fair value.`;
     confidence = 'medium';
   } else if (price > 0.85 || price < 0.15) {
-    // Extreme prices: favorite-longshot bias
+    // Moderate extreme prices: favorite-longshot bias
     if (price > 0.85) {
-      adjustment = 0.02; // Slight upward — favorites tend to be underpriced
+      adjustment = 0.02;
       thesis = `High-probability events (>${(price*100).toFixed(0)}%) are historically slightly underpriced in prediction markets due to the favorite-longshot bias. Bettors over-allocate to longshots, leaving value on heavy favorites.`;
     } else {
-      adjustment = -0.005; // Longshots tend to be overpriced
+      adjustment = -0.005;
       thesis = `Low-probability events (<${(price*100).toFixed(0)}%) are historically overpriced in prediction markets. Bettors are drawn to cheap lottery-ticket odds, inflating prices above true probability. We see slight value on NO.`;
     }
     factors = `Favorite-longshot bias is well-documented in both prediction markets and sports betting. Liquidity at $${formatNum(liq)} is ${liq > 100000 ? 'sufficient for meaningful positions' : 'thin — position size accordingly'}.`;
@@ -367,11 +396,11 @@ function analyzeBias(price, daysLeft, vol24h, liq, raw) {
   } else if (daysLeft < 3 && daysLeft > 0) {
     // Near resolution: time decay
     if (price > 0.4 && price < 0.6) {
-      adjustment = 0; // Coin flip near resolution is uncertain
+      adjustment = 0;
       thesis = `With ${daysLeft} day(s) to resolution and the price near 50/50, this is essentially a coin flip. No clear edge — the market is efficiently pricing uncertainty.`;
       confidence = 'low';
     } else {
-      adjustment = price > 0.5 ? 0.03 : -0.03; // Trend tends to continue
+      adjustment = price > 0.5 ? 0.03 : -0.03;
       thesis = `Near-resolution markets tend to accelerate toward their final outcome. With ${daysLeft} day(s) left and the price at ${(price*100).toFixed(0)}¢, momentum suggests the current direction will hold.`;
       confidence = 'medium';
     }

@@ -401,40 +401,61 @@ function formatMoney(n) {
 
 let allOpportunities = [];
 let activeCategory = 'all';
+let totalScanned = 0;
 
 async function fetchMarkets() {
   try {
-    // Try direct fetch first (may work if CORS is allowed)
     let markets = [];
-    try {
-      const res = await fetch(GAMMA_API + '?closed=false&limit=60&order=volume24hr&ascending=false');
-      if (res.ok) markets = await res.json();
-    } catch(e) {
-      // Try with CORS proxy
+    
+    // Fetch multiple pages to get lots of markets
+    async function fetchPage(offset, limit) {
+      const url = GAMMA_API + `?closed=false&limit=${limit}&offset=${offset}&order=volume24hr&ascending=false`;
       try {
-        const res = await fetch(CORS_PROXY + encodeURIComponent(GAMMA_API + '?closed=false&limit=60&order=volume24hr&ascending=false'));
-        if (res.ok) markets = await res.json();
-      } catch(e2) {
-        console.log('CORS proxy also failed, using embedded data');
-      }
+        const res = await fetch(url);
+        if (res.ok) return await res.json();
+      } catch(e) {}
+      try {
+        const res = await fetch(CORS_PROXY + encodeURIComponent(url));
+        if (res.ok) return await res.json();
+      } catch(e2) {}
+      return [];
     }
+    
+    // Fetch 3 pages of 100 = up to 300 markets
+    const pages = await Promise.all([
+      fetchPage(0, 100),
+      fetchPage(100, 100),
+      fetchPage(200, 100)
+    ]);
+    markets = pages.flat();
 
     if (markets.length === 0) {
       markets = EMBEDDED_MARKETS;
       document.querySelector('.status-badge').textContent = 'Cached Data';
       document.querySelector('.status-badge').style.background = '#f59e0b33';
       document.querySelector('.status-badge').style.color = '#f59e0b';
+    } else {
+      document.querySelector('.status-badge').innerHTML = '<span class="live-dot"></span> Live Data';
+      document.querySelector('.status-badge').style.background = 'var(--green-dim)';
+      document.querySelector('.status-badge').style.color = 'var(--green)';
     }
+
+    // Dedupe by id
+    const seen = new Set();
+    markets = markets.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
 
     // Filter to markets with meaningful data
     const validMarkets = markets.filter(m => {
       if (!m.outcomePrices || !m.question) return false;
-      const price = parseFloat(JSON.parse(m.outcomePrices)[0]);
-      return price > 0 && price < 1 && m.active && !m.closed;
+      try {
+        const price = parseFloat(JSON.parse(m.outcomePrices)[0]);
+        return price > 0 && price < 1 && m.active && !m.closed;
+      } catch(e) { return false; }
     });
 
+    totalScanned = validMarkets.length;
     allOpportunities = validMarkets.map(analyzeMarket)
-      .filter(o => o.edge > 0.003) // Min 0.3% edge
+      .filter(o => o.edge > 0.001) // Min 0.1% edge
       .sort((a,b) => b.edge - a.edge);
 
     document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleString();
@@ -476,7 +497,7 @@ function renderDashboard() {
     <div class="dash-card">
       <div class="label">Opportunities Found</div>
       <div class="value">${ops.length}</div>
-      <div class="sub">Across ${Object.keys(catCounts).length} categories</div>
+      <div class="sub">From ${totalScanned} markets scanned</div>
     </div>
     <div class="dash-card">
       <div class="label">Average Return</div>

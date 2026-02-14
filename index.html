@@ -314,7 +314,12 @@ function analyzeMarket(m) {
       reasoning = `<p><strong>⏰ Event date has passed.</strong> The specific date in the question (${eventDate.toLocaleDateString()}) is already past, but the price is mid-range at ${(price*100).toFixed(1)}¢ — the outcome is unclear. Proceed with caution.</p>`;
     }
   } else {
-    const analysis = generateAnalysis(q, m.description, price, cat, daysLeft, vol24h, liq, m, newsSignals);
+    const groupContext = {
+      groupItemTitle: m.groupItemTitle || null,
+      groupItemThreshold: m.groupItemThreshold || null,
+      negRiskMarketID: m.negRiskMarketID || null
+    };
+    const analysis = generateAnalysis(q, m.description, price, cat, daysLeft, vol24h, liq, m, newsSignals, groupContext);
     modelEstimate = analysis.estimate;
     confidence = analysis.confidence;
     reasoning = analysis.reasoning;
@@ -332,6 +337,12 @@ function analyzeMarket(m) {
   let liqScore = 1;
   if (liq > 500000) liqScore = 3;
   else if (liq > 50000) liqScore = 2;
+
+  // Deep analysis for high-ROI opportunities (>50%)
+  let deepAnalysis = null;
+  if (returnPct > 0.5) {
+    deepAnalysis = generateDeepAnalysis(q, m.description, price, modelEstimate, edge, returnPct, direction, confidence, cat, daysLeft, vol24h, liq, m);
+  }
 
   return {
     id: m.id,
@@ -363,7 +374,8 @@ function analyzeMarket(m) {
     oneDayChange: m.oneDayPriceChange,
     oneWeekChange: m.oneWeekPriceChange,
     news: m.news || null,
-    newsSignals
+    newsSignals,
+    deepAnalysis
   };
 }
 
@@ -435,7 +447,125 @@ function analyzeNewsSentiment(newsItems, question, daysLeft) {
   };
 }
 
-function generateAnalysis(q, desc, price, cat, daysLeft, vol24h, liq, raw, newsSignals) {
+function generateDeepAnalysis(q, desc, price, modelEstimate, edge, returnPct, direction, confidence, cat, daysLeft, vol24h, liq, raw) {
+  const ql = q.toLowerCase();
+  
+  // Determine confidence level for sizing
+  let confLevel = 'low';
+  if (confidence === 'high' && liq > 200000) confLevel = 'high';
+  else if (confidence === 'medium' || liq > 100000) confLevel = 'medium';
+  
+  // Why the model sees edge
+  let whyEdge = '';
+  if (price < 0.1) {
+    whyEdge = `The market prices this at just ${(price*100).toFixed(1)}¢, implying near-impossibility. Our model sees ${(modelEstimate*100).toFixed(1)}% fair value — still unlikely, but the market may be too dismissive. Lottery-ticket bias works both ways: sometimes cheap things are cheap for a reason, but structural underpricing of tail risks does occur.`;
+  } else if (price > 0.9) {
+    whyEdge = `At ${(price*100).toFixed(1)}¢, the market is highly confident. Our model agrees with the direction but sees it as slightly underpriced at ${(modelEstimate*100).toFixed(1)}¢. The edge comes from favorite-longshot bias — bettors systematically underprice near-certainties.`;
+  } else if (Math.abs(raw.oneDayPriceChange || 0) > 0.1) {
+    whyEdge = `A sharp ${((raw.oneDayPriceChange||0)*100).toFixed(1)}¢ move in 24h suggests overreaction. Markets with ${daysLeft}+ days to resolution tend to mean-revert after sudden moves. The edge is a partial fade of this momentum.`;
+  } else {
+    whyEdge = `The model identifies a ${(edge*100).toFixed(1)}pp gap between market price (${(price*100).toFixed(1)}¢) and estimated fair value (${(modelEstimate*100).toFixed(1)}¢). At ${(returnPct*100).toFixed(0)}% ROI, this represents a significant risk/reward opportunity if the thesis is correct.`;
+  }
+  
+  // Risk factors
+  let risks = [];
+  if (liq < 50000) risks.push('⚠️ Low liquidity ($' + formatNum(liq) + ') — slippage risk on entry/exit');
+  if (daysLeft > 30) risks.push('⏳ Long time horizon (' + daysLeft + ' days) — many things can change');
+  if (daysLeft <= 1) risks.push('⏰ Resolves very soon — limited time to react if wrong');
+  if (price < 0.05) risks.push('🎰 Extreme longshot — most of these resolve to NO');
+  if (price > 0.95) risks.push('📌 Near-certain market — edge is real but tiny in absolute terms');
+  if ((raw.oneDayPriceChange || 0) < -0.1) risks.push('📉 Sharply declining — momentum could continue');
+  if ((raw.oneDayPriceChange || 0) > 0.1) risks.push('📈 Sharply rising — may already be priced in');
+  if (vol24h < 10000) risks.push('🔇 Low volume — market may be stale/inefficient OR abandoned');
+  if (risks.length === 0) risks.push('Standard prediction market risks apply — model could be miscalibrated');
+  
+  // Key question
+  let keyQuestion = '';
+  if (/shutdown/.test(ql)) keyQuestion = 'Is this a "new" shutdown or continuation of the existing one? The resolution criteria matter enormously here.';
+  else if (/fed|fomc|interest rate/.test(ql)) keyQuestion = 'Has there been any shift in Fed communication or economic data that the market hasn\'t fully absorbed?';
+  else if (/bitcoin|ethereum|btc|eth|crypto/.test(ql)) keyQuestion = 'Is there a catalyst (ETF flows, regulatory news, macro shift) that could move the price to this level in the timeframe?';
+  else if (/trump|biden|elect/.test(ql)) keyQuestion = 'Is there insider/institutional information the market is pricing that you don\'t have?';
+  else if (/war|strike|military/.test(ql)) keyQuestion = 'Geopolitical events are fat-tailed — is the current price reflecting the true tail risk, or is it noise?';
+  else keyQuestion = 'What does the smart money know? Check if large recent trades have moved the price — that\'s where the real signal is.';
+  
+  return {
+    whyEdge,
+    risks,
+    sizingHint: `High edge (${(returnPct*100).toFixed(0)}% ROI) but ${confLevel} confidence — size accordingly.${confLevel === 'low' ? ' Consider this a small speculative position at most.' : confLevel === 'medium' ? ' Moderate position if thesis holds up to scrutiny.' : ' Reasonable to take a meaningful position.'}`,
+    keyQuestion,
+    confLevel
+  };
+}
+
+function generateAnalysis(q, desc, price, cat, daysLeft, vol24h, liq, raw, newsSignals, groupContext) {
+  const ql = q.toLowerCase();
+  let estimate, confidence, reasoning;
+
+  // === GROUP-AWARE ANALYSIS for related/bracket markets ===
+  if (groupContext && groupContext.groupItemTitle) {
+    const threshold = groupContext.groupItemThreshold;
+    const title = groupContext.groupItemTitle;
+    
+    // Parse numeric threshold from title or threshold field
+    let thresholdNum = null;
+    if (threshold != null && !isNaN(parseFloat(threshold))) {
+      thresholdNum = parseFloat(threshold);
+    } else {
+      const numMatch = title.match(/([\d.]+)\+?/);
+      if (numMatch) thresholdNum = parseFloat(numMatch[1]);
+    }
+    
+    // Detect bracket/duration patterns
+    const isDuration = /last|day|hour|week|month/i.test(ql + ' ' + title);
+    const isPriceTarget = /reach|\$|price|above|below/i.test(ql + ' ' + title);
+    const isBpsTarget = /bps|basis point|bp\b/i.test(ql + ' ' + title);
+    
+    if (thresholdNum !== null && (isDuration || isPriceTarget || isBpsTarget)) {
+      let groupNote = '';
+      
+      // If price is very low (<10¢) and this is a bracket market, it's likely already exceeded or impossible
+      if (price < 0.10 && isDuration && daysLeft === 0) {
+        groupNote = `<p><strong>🔗 Group context:</strong> This is a bracket market (threshold: ${title}). The very low price of ${(price*100).toFixed(1)}¢ near resolution suggests this threshold has likely already been passed or is no longer achievable. <strong>No actionable edge</strong> — the market is correctly pricing a near-impossible outcome.</p>`;
+        // Override: agree with market, no edge
+        estimate = Math.min(price, price * 0.9);
+        confidence = 'low';
+        reasoning = groupNote + `<p><strong>Our view:</strong> This bracket is effectively dead. The market price reflects that this specific threshold is no longer in play. Look at adjacent brackets in the same group for live opportunities.</p>`;
+        return { estimate, confidence, reasoning };
+      }
+      
+      if (price > 0.90 && isDuration && daysLeft === 0) {
+        groupNote = `<p><strong>🔗 Group context:</strong> This is a bracket market (threshold: ${title}). The high price of ${(price*100).toFixed(1)}¢ near resolution suggests this is the winning bracket. The market is converging on this outcome.</p>`;
+        estimate = Math.max(price, price + (1 - price) * 0.05);
+        confidence = 'low';
+        reasoning = groupNote + `<p><strong>Our view:</strong> This appears to be the resolving bracket. Minimal edge remains — the market has largely priced in the outcome.</p>`;
+        return { estimate, confidence, reasoning };
+      }
+      
+      // For active bracket markets with time remaining
+      if (daysLeft > 0) {
+        groupNote = `<p><strong>🔗 Bracket market:</strong> "${title}" — this is one of several mutually exclusive outcomes in the same event group. `;
+        if (isDuration) {
+          groupNote += `The threshold is ${thresholdNum} ${/day/i.test(title) ? 'days' : /hour/i.test(title) ? 'hours' : 'units'}. Consider how the current situation tracks against ALL brackets, not just this one.</p>`;
+        } else if (isPriceTarget) {
+          groupNote += `The price target is $${thresholdNum}. Consider current price trajectory and volatility against ALL brackets.</p>`;
+        } else {
+          groupNote += `The threshold is ${thresholdNum}. Consider the current value relative to ALL brackets.</p>`;
+        }
+      }
+      
+      // If we have a group note but didn't early-return, prepend it to normal analysis
+      if (groupNote) {
+        // Fall through to normal analysis but prepend group context
+        const base = _generateBaseAnalysis(q, desc, price, cat, daysLeft, vol24h, liq, raw, newsSignals);
+        return { estimate: base.estimate, confidence: base.confidence, reasoning: groupNote + base.reasoning };
+      }
+    }
+  }
+
+  return _generateBaseAnalysis(q, desc, price, cat, daysLeft, vol24h, liq, raw, newsSignals);
+}
+
+function _generateBaseAnalysis(q, desc, price, cat, daysLeft, vol24h, liq, raw, newsSignals) {
   const ql = q.toLowerCase();
   let estimate, confidence, reasoning;
 
@@ -834,7 +964,7 @@ function renderGrid() {
     <div class="card" onclick="openModal('${o.id}')">
       <div class="card-top">
         <div class="card-title">${o.question}</div>
-        <div class="card-edge ${edgeClass}">+${(o.returnPct*100).toFixed(1)}% ROI</div>
+        <div class="card-edge ${edgeClass}">${o.deepAnalysis ? '🔥 ' : ''}+${(o.returnPct*100).toFixed(1)}% ROI</div>
       </div>
       <div class="card-meta">
         <span class="tag ${catInfo.class}">${catInfo.label}</span>
@@ -929,6 +1059,18 @@ function openModal(id) {
       <h3>🧠 Why We Think This</h3>
       <div class="analysis-text">${o.reasoning}</div>
     </div>
+
+    ${o.deepAnalysis ? `
+    <div class="modal-section" style="border:1px solid #f59e0b44;border-radius:12px;padding:20px;background:#f59e0b08">
+      <h3>🔥 Deep Analysis <span style="font-size:11px;font-weight:400;color:var(--orange)">(${(o.returnPct*100).toFixed(0)}% ROI opportunity)</span></h3>
+      <div class="analysis-text">
+        <p><strong>Why we see edge:</strong> ${o.deepAnalysis.whyEdge}</p>
+        <p><strong>Risk factors:</strong></p>
+        <ul style="margin:0 0 12px 20px;color:var(--text-dim)">${o.deepAnalysis.risks.map(r => '<li>' + r + '</li>').join('')}</ul>
+        <p><strong>Position sizing:</strong> ${o.deepAnalysis.sizingHint}</p>
+        <p><strong>🔑 Key question:</strong> <em>${o.deepAnalysis.keyQuestion}</em></p>
+      </div>
+    </div>` : ''}
 
     ${o.newsSignals && o.newsSignals.hasNews ? `
     <div class="modal-section">

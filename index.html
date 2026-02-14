@@ -407,27 +407,32 @@ async function fetchMarkets() {
   try {
     let markets = [];
     
-    // Fetch multiple pages to get lots of markets
-    async function fetchPage(offset, limit) {
-      const url = GAMMA_API + `?closed=false&limit=${limit}&offset=${offset}&order=volume24hr&ascending=false`;
-      try {
-        const res = await fetch(url);
-        if (res.ok) return await res.json();
-      } catch(e) {}
-      try {
-        const res = await fetch(CORS_PROXY + encodeURIComponent(url));
-        if (res.ok) return await res.json();
-      } catch(e2) {}
-      return [];
+    // Use our own Vercel serverless proxy to avoid CORS
+    try {
+      const res = await fetch('/api/markets');
+      if (res.ok) {
+        const data = await res.json();
+        markets = data.markets || [];
+      }
+    } catch(e) {
+      console.log('Proxy API failed, trying direct...');
     }
     
-    // Fetch 3 pages of 100 = up to 300 markets
-    const pages = await Promise.all([
-      fetchPage(0, 100),
-      fetchPage(100, 100),
-      fetchPage(200, 100)
-    ]);
-    markets = pages.flat();
+    // Fallback: try direct API (works if CORS allows)
+    if (markets.length === 0) {
+      try {
+        const res = await fetch(GAMMA_API + '?closed=false&limit=100&order=volume24hr&ascending=false');
+        if (res.ok) markets = await res.json();
+      } catch(e) {}
+    }
+    
+    // Fallback: CORS proxy
+    if (markets.length === 0) {
+      try {
+        const res = await fetch(CORS_PROXY + encodeURIComponent(GAMMA_API + '?closed=false&limit=100&order=volume24hr&ascending=false'));
+        if (res.ok) markets = await res.json();
+      } catch(e) {}
+    }
 
     if (markets.length === 0) {
       markets = EMBEDDED_MARKETS;

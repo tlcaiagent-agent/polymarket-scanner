@@ -225,9 +225,12 @@ function analyzeMarket(m) {
   const liq = m.liquidityNum || 0;
   const spread = m.spread || 0;
 
+  // Analyze news sentiment if available
+  const newsSignals = m.news ? analyzeNewsSentiment(m.news, q, daysLeft) : null;
+
   // Model estimate based on heuristics
   let modelEstimate, confidence, reasoning;
-  const analysis = generateAnalysis(q, m.description, price, cat, daysLeft, vol24h, liq, m);
+  const analysis = generateAnalysis(q, m.description, price, cat, daysLeft, vol24h, liq, m, newsSignals);
   modelEstimate = analysis.estimate;
   confidence = analysis.confidence;
   reasoning = analysis.reasoning;
@@ -267,11 +270,81 @@ function analyzeMarket(m) {
     bestBid: m.bestBid,
     bestAsk: m.bestAsk,
     oneDayChange: m.oneDayPriceChange,
-    oneWeekChange: m.oneWeekPriceChange
+    oneWeekChange: m.oneWeekPriceChange,
+    news: m.news || null,
+    newsSignals
   };
 }
 
-function generateAnalysis(q, desc, price, cat, daysLeft, vol24h, liq, raw) {
+function analyzeNewsSentiment(newsItems, question, daysLeft) {
+  const BULLISH_WORDS = /\b(passes|passed|approved|confirms|confirmed|wins|won|signs|signed|agrees|agreed|closes|closed|rises|rising|surges|soars|rallies|record high|breakthrough|deal|success)\b/i;
+  const BEARISH_WORDS = /\b(fails|failed|rejected|rejects|unlikely|delays|delayed|blocks|blocked|falls|falling|drops|crashes|collapses|stalls|opposes|vetoes|denied|loses|lost)\b/i;
+  const NEUTRAL_WORDS = /\b(expected|likely|predicted|forecast|may|could|might|considers|considering|discusses|plans|proposes)\b/i;
+
+  const now = new Date();
+  const signals = newsItems.map(item => {
+    const text = (item.title + ' ' + (item.description || '')).toLowerCase();
+    let sentiment = 0; // -1 to 1
+    let label = 'neutral';
+
+    const bullishMatches = text.match(BULLISH_WORDS);
+    const bearishMatches = text.match(BEARISH_WORDS);
+
+    if (bullishMatches && !bearishMatches) { sentiment = 0.6; label = 'bullish'; }
+    else if (bearishMatches && !bullishMatches) { sentiment = -0.6; label = 'bearish'; }
+    else if (bullishMatches && bearishMatches) { sentiment = 0; label = 'mixed'; }
+    else if (NEUTRAL_WORDS.test(text)) { sentiment = 0.15; label = 'lean-yes'; }
+
+    // Recency weight
+    const pubDate = item.publishedAt ? new Date(item.publishedAt) : null;
+    const hoursAgo = pubDate ? (now - pubDate) / 3600000 : 48;
+    const recencyWeight = hoursAgo < 6 ? 1.0 : hoursAgo < 24 ? 0.7 : hoursAgo < 48 ? 0.4 : 0.2;
+
+    // Time-to-resolution weight: news matters more when close to resolution
+    const timeWeight = daysLeft <= 1 ? 1.0 : daysLeft <= 3 ? 0.7 : daysLeft <= 7 ? 0.5 : 0.3;
+
+    const weight = recencyWeight * timeWeight;
+
+    return {
+      title: item.title,
+      source: item.source,
+      url: item.url,
+      publishedAt: item.publishedAt,
+      hoursAgo: Math.round(hoursAgo),
+      sentiment,
+      label,
+      weight
+    };
+  });
+
+  // Aggregate
+  let totalWeight = 0, weightedSentiment = 0;
+  for (const s of signals) {
+    if (s.sentiment !== 0) {
+      weightedSentiment += s.sentiment * s.weight;
+      totalWeight += s.weight;
+    }
+  }
+  const avgSentiment = totalWeight > 0 ? weightedSentiment / totalWeight : 0;
+
+  // Agreement factor: if multiple headlines agree, boost confidence
+  const agreeing = signals.filter(s => Math.sign(s.sentiment) === Math.sign(avgSentiment) && s.sentiment !== 0).length;
+  const agreementBoost = agreeing >= 3 ? 1.5 : agreeing >= 2 ? 1.2 : 1.0;
+
+  // Final adjustment to model estimate (capped)
+  const rawAdjustment = avgSentiment * 0.08 * agreementBoost;
+  const adjustment = Math.max(-0.12, Math.min(0.12, rawAdjustment));
+
+  return {
+    signals,
+    avgSentiment,
+    adjustment,
+    agreementLevel: agreeing,
+    hasNews: signals.length > 0
+  };
+}
+
+function generateAnalysis(q, desc, price, cat, daysLeft, vol24h, liq, raw, newsSignals) {
   const ql = q.toLowerCase();
   let estimate, confidence, reasoning;
 
@@ -327,10 +400,19 @@ function generateAnalysis(q, desc, price, cat, daysLeft, vol24h, liq, raw) {
   else {
     // Heuristic model: adjust price based on common biases
     const bias = analyzeBias(price, daysLeft, vol24h, liq, raw);
-    estimate = Math.max(0.001, Math.min(0.999, price + bias.adjustment));
+    let totalAdj = bias.adjustment;
+    let newsNote = '';
+    if (newsSignals && newsSignals.hasNews && newsSignals.adjustment !== 0) {
+      totalAdj += newsSignals.adjustment;
+      const dir = newsSignals.adjustment > 0 ? 'bullish (YES)' : 'bearish (NO)';
+      newsNote = `<p><strong>📰 News signal:</strong> Recent headlines lean ${dir}, adjusting our estimate by ${(newsSignals.adjustment*100).toFixed(1)}pp. ${newsSignals.agreementLevel >= 3 ? 'Multiple sources agree, increasing conviction.' : ''}</p>`;
+    }
+    estimate = Math.max(0.001, Math.min(0.999, price + totalAdj));
     confidence = bias.confidence;
+    if (newsSignals && newsSignals.hasNews && Math.abs(newsSignals.adjustment) > 0.03 && confidence === 'low') confidence = 'medium';
     reasoning = `<p><strong>What the market is pricing:</strong> "${q}" is trading at ${(price*100).toFixed(1)}¢ YES / ${((1-price)*100).toFixed(1)}¢ NO${daysLeft > 0 ? `, with ${daysLeft} days until resolution` : ''}. 24-hour volume is $${formatNum(vol24h)}.</p>
     <p><strong>Our view:</strong> ${bias.thesis}</p>
+    ${newsNote}
     <p><strong>Key factors:</strong> ${bias.factors}</p>`;
   }
 
@@ -684,7 +766,7 @@ function renderGrid() {
       </div>
       <div class="card-bar"><div class="card-bar-fill" style="width:${barWidth}%;background:${barColor}"></div></div>
       <div class="card-bottom">
-        <div class="card-resolution">⏱ ${o.daysLeft === 0 ? 'Today' : o.daysLeft + 'd left'}</div>
+        <div class="card-resolution">⏱ ${o.daysLeft === 0 ? 'Today' : o.daysLeft + 'd left'}${o.news ? ' 📰' : ''}</div>
         <div>Vol: ${formatMoney(o.volume24h)}/24h</div>
       </div>
     </div>`;
@@ -756,6 +838,28 @@ function openModal(id) {
       <h3>🧠 Why We Think This</h3>
       <div class="analysis-text">${o.reasoning}</div>
     </div>
+
+    ${o.newsSignals && o.newsSignals.hasNews ? `
+    <div class="modal-section">
+      <h3>📰 News Signals</h3>
+      <div class="edge-breakdown">
+        ${o.newsSignals.signals.map(s => `
+          <div class="edge-row" style="flex-direction:column;gap:4px;padding:10px 0">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+              <a href="${s.url}" target="_blank" style="font-size:13px;line-height:1.4;flex:1">${s.title}</a>
+              <span style="white-space:nowrap;font-size:11px;padding:2px 6px;border-radius:4px;background:${s.label==='bullish'?'var(--green-dim)':s.label==='bearish'?'var(--red-dim)':'var(--border)'};color:${s.label==='bullish'?'var(--green)':s.label==='bearish'?'var(--red)':'var(--text-dim)'}">${s.label === 'bullish' ? '▲ YES' : s.label === 'bearish' ? '▼ NO' : '— Neutral'}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted)">${s.source}${s.hoursAgo !== undefined ? ` · ${s.hoursAgo < 1 ? 'just now' : s.hoursAgo + 'h ago'}` : ''} · Weight: ${(s.weight*100).toFixed(0)}%</div>
+          </div>
+        `).join('')}
+        <div class="edge-row" style="font-weight:600">
+          <span class="el">Net News Sentiment</span>
+          <span style="color:${o.newsSignals.avgSentiment > 0 ? 'var(--green)' : o.newsSignals.avgSentiment < 0 ? 'var(--red)' : 'var(--text-dim)'}">
+            ${o.newsSignals.avgSentiment > 0 ? '▲ Bullish' : o.newsSignals.avgSentiment < 0 ? '▼ Bearish' : '— Neutral'} (${(o.newsSignals.adjustment*100).toFixed(1)}pp adjustment)
+          </span>
+        </div>
+      </div>
+    </div>` : ''}
 
     <div class="modal-section">
       <h3>📈 Market Stats</h3>

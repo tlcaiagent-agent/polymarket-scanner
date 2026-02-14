@@ -1,0 +1,22 @@
+========================================
+QA Report — 2026-02-14 01:22:39 UTC
+========================================
+
+--- API Tests ---
+ISSUES FOUND:
+  ❌ STALE MARKET: "Will Elon Musk post <40 tweets from February 12 to February " has past date but mid-range price 0.19
+  ❌ STALE MARKET: "Will Elon Musk post 40-64 tweets from February 12 to Februar" has past date but mid-range price 0.61
+  ❌ STALE MARKET: "Will Elon Musk post 65-89 tweets from February 12 to Februar" has past date but mid-range price 0.17
+Stats: 300 markets, 26 with news, 7 live prices
+✅ Price API OK: {"btc": {"price": 69045, "change24h": 4.310699257890813}, "eth": {"price": 2053.95, "change24h": 5.80000484866782}, "sol": {"price": 85.01, "change24h": 8.286032720519145}, "xrp": {"price": 1.42, "cha
+
+--- Frontend Tests ---
+FRONTEND ISSUES:
+  ❌ DUPLICATE FUNCTIONS: {'autoTrader': 2, 'updateAutoStats': 2, 'renderTradeLog': 2}
+
+--- Logic Tests ---
+LOGIC ISSUES (1):
+  ❌ EXPIRED+ACTIVE: "Michigan State Spartans vs. Wisconsin Badgers" ended 2026-02-14T01:00:00Z but price is 0.47
+
+========================================
+Done.

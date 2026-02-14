@@ -346,42 +346,81 @@ function analyzeBias(price, daysLeft, vol24h, liq, raw) {
   const dayChange = raw.oneDayPriceChange || 0;
   const weekChange = raw.oneWeekPriceChange || 0;
 
-  // === RESOLVED / ESSENTIALLY RESOLVED MARKETS ===
-  // If market is at resolution date (0 days left) or price is extreme (>95% or <5%),
-  // the market is likely settled. Trust the market, don't second-guess it.
-  if (daysLeft === 0 && (price > 0.9 || price < 0.1)) {
-    // Market is at resolution and strongly directional — it's decided
-    adjustment = 0;
-    thesis = `This market is at or past its resolution date with the price at ${(price*100).toFixed(0)}¢. The outcome is essentially determined. No model edge exists — the market is reflecting the known result.`;
-    factors = `Market is resolved or resolving. Price reflects the actual outcome.`;
+  // === RESOLVED / RESOLVING MARKETS (daysLeft === 0) ===
+  // When a market is at its resolution date, price moves reflect the ACTUAL OUTCOME,
+  // not tradeable overreactions. Never fade a resolved market.
+  if (daysLeft === 0) {
+    if (price > 0.8) {
+      // YES outcome likely happened — agree with market or nudge higher
+      adjustment = Math.max(0, (1 - price) * 0.1); // Tiny nudge toward 100%, never below market
+      thesis = `This market is at its resolution date. The price at ${(price*100).toFixed(0)}¢ YES indicates the outcome has likely occurred or is being confirmed. The sharp price movement reflects the actual outcome being priced in, not a tradeable overreaction.`;
+      factors = `Market is resolved or resolving. Price reflects the actual outcome. No edge exists against the direction of resolution.`;
+    } else if (price < 0.2) {
+      // NO outcome likely happened — agree with market or nudge lower
+      adjustment = Math.min(0, -(price) * 0.1); // Tiny nudge toward 0%, never above market
+      thesis = `This market is at its resolution date. The price at ${(price*100).toFixed(0)}¢ YES indicates the YES outcome has likely NOT occurred. The price movement reflects the actual outcome being priced in, not a tradeable overreaction.`;
+      factors = `Market is resolved or resolving. Price reflects the actual outcome. No edge exists against the direction of resolution.`;
+    } else {
+      // Resolution day but price is mid-range — genuinely uncertain
+      adjustment = 0;
+      thesis = `This market is at its resolution date but the price remains mid-range at ${(price*100).toFixed(0)}¢, suggesting the outcome is still genuinely uncertain. The result should be known very soon.`;
+      factors = `Resolution imminent. Outcome not yet determined. High uncertainty remains.`;
+    }
     confidence = 'low';
     return { adjustment, thesis, factors, confidence };
   }
 
-  // If price is very extreme (>95% or <5%) regardless of time, the market is near-certain.
-  // Don't apply adjustments that would pull it AWAY from certainty.
-  if (price > 0.95 || price < 0.05) {
-    // Near-certain markets: tiny adjustment toward certainty only
-    if (price > 0.95) {
-      adjustment = Math.min(0.01, (1 - price) * 0.3); // Nudge toward 100%, never away
-      thesis = `This market is pricing at ${(price*100).toFixed(1)}% — near certainty. Extreme favorites in prediction markets tend to be very slightly underpriced due to capital opportunity cost. Minimal edge exists.`;
+  // === NEAR-RESOLUTION MARKETS (daysLeft <= 1) ===
+  // Large moves close to resolution are resolution SIGNALS, not overreactions.
+  if (daysLeft <= 1 && Math.abs(dayChange) > 0.2) {
+    // Big move near resolution = the answer is being priced in
+    // AGREE with the move direction, don't fade it
+    if (dayChange > 0) {
+      adjustment = Math.max(0, dayChange * 0.05); // Small nudge WITH the move
     } else {
-      adjustment = Math.max(-0.01, -(price) * 0.3); // Nudge toward 0%, never away
-      thesis = `This market is pricing at ${(price*100).toFixed(1)}% — near zero probability. Extreme longshots tend to be slightly overpriced due to lottery-ticket bias. Minimal edge on NO.`;
+      adjustment = Math.min(0, dayChange * 0.05); // Small nudge WITH the move
     }
-    factors = `Near-certain market. The market consensus is strong and likely correct. Only micro-edges from structural biases.`;
+    thesis = `This market resolves in ${daysLeft} day(s) and has moved ${(dayChange*100).toFixed(1)}¢ in the last 24 hours. Near resolution, large moves typically reflect emerging information about the actual outcome — this is a resolution signal, not an overreaction to fade.`;
+    factors = `Near-resolution large move interpreted as outcome signal. The market is converging on the answer. Limited edge available.`;
+    confidence = 'low';
+    return { adjustment, thesis, factors, confidence };
+  }
+
+  // === ESSENTIALLY DECIDED MARKETS (>95% or <5%) ===
+  // Regardless of time remaining, these are near-certain. Track the market closely.
+  if (price > 0.95) {
+    adjustment = Math.min(0.005, (1 - price) * 0.15); // Tiny nudge toward 100%, never away
+    thesis = `This market is pricing at ${(price*100).toFixed(1)}% — near certainty. The consensus is overwhelming and likely correct. Only micro-edges from structural biases (capital opportunity cost on locked-up funds).`;
+    factors = `Near-certain market. Only structural micro-edges exist.`;
+    confidence = 'low';
+    return { adjustment, thesis, factors, confidence };
+  }
+  if (price < 0.05) {
+    adjustment = Math.max(-0.005, -(price) * 0.15); // Tiny nudge toward 0%, never away
+    thesis = `This market is pricing at ${(price*100).toFixed(1)}% — near zero probability. Extreme longshots tend to be slightly overpriced due to lottery-ticket bias. Minimal edge on NO.`;
+    factors = `Near-certain market. Only structural micro-edges exist.`;
     confidence = 'low';
     return { adjustment, thesis, factors, confidence };
   }
 
   // === ACTIVE MARKETS WITH REAL UNCERTAINTY ===
 
-  // Recency bias: sharp recent moves often overshoot
-  if (Math.abs(dayChange) > 0.1) {
+  // Recency bias: sharp recent moves often overshoot — BUT ONLY for markets with time left
+  if (Math.abs(dayChange) > 0.1 && daysLeft > 3) {
     adjustment = -dayChange * 0.15;
     thesis = `The market moved ${(dayChange*100).toFixed(1)}¢ in the last 24 hours, which suggests potential overreaction. Large single-day moves in prediction markets tend to overshoot by 10-20% before mean-reverting. We're fading a portion of this move.`;
     factors = `Momentum and mean-reversion dynamics. High 24h volume ($${formatNum(vol24h)}) confirms active repricing, but late movers often push prices past fair value.`;
     confidence = 'medium';
+  } else if (Math.abs(dayChange) > 0.1 && daysLeft <= 3) {
+    // Near resolution with big move but not huge (0.1-0.2 range) — lean with the move
+    if (dayChange > 0) {
+      adjustment = Math.max(0, dayChange * 0.05);
+    } else {
+      adjustment = Math.min(0, dayChange * 0.05);
+    }
+    thesis = `The market moved ${(dayChange*100).toFixed(1)}¢ in the last 24 hours with only ${daysLeft} day(s) to resolution. Near-expiry moves are more likely to reflect real information than overreaction. We lean with the move direction.`;
+    factors = `Near-resolution momentum. Information-driven repricing is more likely than noise this close to the outcome.`;
+    confidence = 'low';
   } else if (price > 0.85 || price < 0.15) {
     // Moderate extreme prices: favorite-longshot bias
     if (price > 0.85) {
